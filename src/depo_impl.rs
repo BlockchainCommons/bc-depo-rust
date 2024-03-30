@@ -2,10 +2,11 @@ use std::collections::HashSet;
 
 use anyhow::bail;
 use async_trait::async_trait;
-use bc_components::{PublicKeyBase, ARID, PrivateKeyBase};
+use bc_components::{PrivateKeyBase, PublicKeyBase, ARID};
 use depo_api::{receipt::Receipt, util::Abbrev};
 
-use crate::{user::User, record::Record};
+use crate::record::Record;
+use crate::user::User;
 
 #[async_trait]
 pub trait DepoImpl {
@@ -21,12 +22,20 @@ pub trait DepoImpl {
     async fn id_to_receipts(&self, user_id: &ARID) -> anyhow::Result<HashSet<Receipt>>;
     async fn receipt_to_record(&self, receipt: &Receipt) -> anyhow::Result<Option<Record>>;
     async fn delete_record(&self, receipt: &Receipt) -> anyhow::Result<()>;
-    async fn set_user_key(&self, old_key: &PublicKeyBase, new_key: &PublicKeyBase) -> anyhow::Result<()>;
+    async fn set_user_key(
+        &self,
+        old_key: &PublicKeyBase,
+        new_key: &PublicKeyBase,
+    ) -> anyhow::Result<()>;
     async fn set_user_recovery(&self, user: &User, recovery: Option<&str>) -> anyhow::Result<()>;
     async fn remove_user(&self, user: &User) -> anyhow::Result<()>;
     async fn recovery_to_user(&self, recovery: &str) -> anyhow::Result<Option<User>>;
 
-    async fn records_for_id_and_receipts(&self, user_id: &ARID, recipts: &HashSet<Receipt>) -> anyhow::Result<Vec<Record>> {
+    async fn records_for_id_and_receipts(
+        &self,
+        user_id: &ARID,
+        recipts: &HashSet<Receipt>,
+    ) -> anyhow::Result<Vec<Record>> {
         let mut result = Vec::new();
         let user_receipts = self.id_to_receipts(user_id).await?;
         for receipt in recipts {

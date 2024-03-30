@@ -1,12 +1,18 @@
-use std::{collections::{HashSet, HashMap}, sync::Arc};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+};
 
 use async_trait::async_trait;
-use bc_components::{PublicKeyBase, PrivateKeyBase, ARID};
-use tokio::sync::RwLock;
-use depo_api::receipt::Receipt;
+use bc_components::{PrivateKeyBase, PublicKeyBase, ARID};
 use bc_envelope::prelude::*;
+use depo_api::receipt::Receipt;
+use tokio::sync::RwLock;
 
-use crate::{depo_impl::DepoImpl, user::User, record::Record, function::Depo, MAX_DATA_SIZE, CONTINUATION_EXPIRY_SECONDS};
+use crate::{depo_impl::DepoImpl, function::Depo, record::Record};
+
+use crate::user::User;
+use bc_server_api::{CONTINUATION_EXPIRY_SECONDS, MAX_DATA_SIZE};
 
 struct Inner {
     id_to_user: HashMap<ARID, User>,
@@ -38,7 +44,7 @@ impl MemDepoImpl {
                 public_key_to_id: HashMap::new(),
                 receipt_to_record: HashMap::new(),
                 id_to_receipts: HashMap::new(),
-            })
+            }),
         })
     }
 }
@@ -53,8 +59,8 @@ impl std::fmt::Debug for MemDepoImpl {
                     read.receipt_to_record,
                     read.id_to_receipts,
                 )
-            },
-            Err(_) => write!(f, "MemStore: <locked>")
+            }
+            Err(_) => write!(f, "MemStore: <locked>"),
         }
     }
 }
@@ -82,7 +88,13 @@ impl DepoImpl for MemDepoImpl {
     }
 
     async fn existing_key_to_id(&self, public_key: &PublicKeyBase) -> anyhow::Result<Option<ARID>> {
-        Ok(self.inner.read().await.public_key_to_id.get(public_key).cloned())
+        Ok(self
+            .inner
+            .read()
+            .await
+            .public_key_to_id
+            .get(public_key)
+            .cloned())
     }
 
     async fn existing_id_to_user(&self, user_id: &ARID) -> anyhow::Result<Option<User>> {
@@ -91,22 +103,41 @@ impl DepoImpl for MemDepoImpl {
 
     async fn insert_user(&self, user: &User) -> anyhow::Result<()> {
         let mut write = self.inner.write().await;
-        write.id_to_user.insert(user.user_id().clone(), user.clone());
-        write.public_key_to_id.insert(user.public_key().clone(), user.user_id().clone());
-        write.id_to_receipts.insert(user.user_id().clone(), HashSet::new());
+        write
+            .id_to_user
+            .insert(user.user_id().clone(), user.clone());
+        write
+            .public_key_to_id
+            .insert(user.public_key().clone(), user.user_id().clone());
+        write
+            .id_to_receipts
+            .insert(user.user_id().clone(), HashSet::new());
         Ok(())
     }
 
     async fn insert_record(&self, record: &Record) -> anyhow::Result<()> {
         let mut write = self.inner.write().await;
         let receipt = record.receipt();
-        write.receipt_to_record.insert(receipt.clone(), record.clone());
-        write.id_to_receipts.get_mut(record.user_id()).unwrap().insert(receipt.clone());
+        write
+            .receipt_to_record
+            .insert(receipt.clone(), record.clone());
+        write
+            .id_to_receipts
+            .get_mut(record.user_id())
+            .unwrap()
+            .insert(receipt.clone());
         Ok(())
     }
 
     async fn id_to_receipts(&self, user_id: &ARID) -> anyhow::Result<HashSet<Receipt>> {
-        Ok(self.inner.read().await.id_to_receipts.get(user_id).unwrap().clone())
+        Ok(self
+            .inner
+            .read()
+            .await
+            .id_to_receipts
+            .get(user_id)
+            .unwrap()
+            .clone())
     }
 
     async fn receipt_to_record(&self, receipt: &Receipt) -> anyhow::Result<Option<Record>> {
@@ -120,16 +151,26 @@ impl DepoImpl for MemDepoImpl {
         if let Some(record) = record {
             let mut write = self.inner.write().await;
             write.receipt_to_record.remove(receipt);
-            write.id_to_receipts.get_mut(record.user_id()).unwrap().remove(receipt);
+            write
+                .id_to_receipts
+                .get_mut(record.user_id())
+                .unwrap()
+                .remove(receipt);
         }
         Ok(())
     }
 
-    async fn set_user_key(&self, old_public_key: &PublicKeyBase, new_public_key: &PublicKeyBase) -> anyhow::Result<()> {
+    async fn set_user_key(
+        &self,
+        old_public_key: &PublicKeyBase,
+        new_public_key: &PublicKeyBase,
+    ) -> anyhow::Result<()> {
         let user = self.expect_key_to_user(old_public_key).await?;
         let mut write = self.inner.write().await;
         write.public_key_to_id.remove(old_public_key);
-        write.public_key_to_id.insert(new_public_key.clone(), user.user_id().clone());
+        write
+            .public_key_to_id
+            .insert(new_public_key.clone(), user.user_id().clone());
         let user = write.id_to_user.get_mut(user.user_id()).unwrap();
         user.set_public_key(new_public_key.clone());
         Ok(())
@@ -150,7 +191,9 @@ impl DepoImpl for MemDepoImpl {
         }
         // Add the new recovery, if any
         if let Some(recovery) = recovery {
-            write.recovery_to_id.insert(recovery.to_string(), user.user_id().clone());
+            write
+                .recovery_to_id
+                .insert(recovery.to_string(), user.user_id().clone());
         }
         // Set the user record to the new recovery
         let user = write.id_to_user.get_mut(user.user_id()).unwrap();
@@ -162,7 +205,9 @@ impl DepoImpl for MemDepoImpl {
         let mut write = self.inner.write().await;
 
         write.public_key_to_id.remove(user.public_key());
-        write.recovery_to_id.remove(user.recovery().unwrap_or_default());
+        write
+            .recovery_to_id
+            .remove(user.recovery().unwrap_or_default());
         write.id_to_user.remove(user.user_id());
         write.id_to_receipts.remove(user.user_id());
         Ok(())
@@ -170,8 +215,7 @@ impl DepoImpl for MemDepoImpl {
 
     async fn recovery_to_user(&self, recovery: &str) -> anyhow::Result<Option<User>> {
         let read = self.inner.read().await;
-        let user_id = read.recovery_to_id
-            .get(recovery);
+        let user_id = read.recovery_to_id.get(recovery);
         let user = if let Some(user_id) = user_id {
             self.existing_id_to_user(user_id).await?
         } else {

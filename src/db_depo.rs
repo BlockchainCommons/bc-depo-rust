@@ -1,5 +1,9 @@
-use std::{collections::HashSet, sync::Arc};
+use std::{collections::HashSet, env, sync::Arc};
 
+use crate::depo_impl::DepoImpl;
+use crate::function::Depo;
+use crate::record::Record;
+use crate::user::User;
 use anyhow::anyhow;
 use async_trait::async_trait;
 use bc_components::{PrivateKeyBase, PublicKeyBase, ARID};
@@ -8,13 +12,11 @@ use depo_api::receipt::Receipt;
 use mysql_async::{prelude::*, Pool, Row};
 use url::Url;
 
-use crate::{
-    depo_impl::DepoImpl, function::Depo, record::Record, user::User,
-    CONTINUATION_EXPIRY_SECONDS, MAX_DATA_SIZE,
-};
+use bc_server_api::{CONTINUATION_EXPIRY_SECONDS, MAX_DATA_SIZE};
 
 const USER: &str = "root";
 const PASSWORD: Option<&str> = None;
+// @todo Make hostname configurable because if depo is running in Docker then it needs the db container's hostname.
 const HOST: &str = "localhost";
 const PORT: u16 = 3306;
 
@@ -260,7 +262,7 @@ impl DepoImpl for DbDepoImpl {
 
     async fn recovery_to_user(&self, recovery: &str) -> anyhow::Result<Option<User>> {
         let mut conn = self.pool.get_conn().await?;
-        let query = "SELECT user_id, public_key, recovery FROM users WHERE recovery = :recovery";
+        let query = "SELECT user_id, public_key, recovery FROM users WHERE recovery = :recovery"; // @audit Are these parameters safe to use?
         let params = params! {
             "recovery" => recovery
         };
@@ -310,10 +312,16 @@ pub async fn key_to_user(
 
 pub fn server_url() -> Url {
     let mut server_url = Url::parse("mysql://").unwrap();
-    server_url.set_host(Some(HOST)).unwrap();
+    let host = match env::var("DB_HOST") {
+        Ok(val) => String::from(val.trim_matches('"')),
+        Err(_) => HOST.to_string(),
+    };
+    println!("Using host: {}", host);
+    server_url.set_host(Some(&host)).unwrap();
     server_url.set_username(USER).unwrap();
     server_url.set_password(PASSWORD).unwrap();
     server_url.set_port(Some(PORT)).unwrap();
+    println!("Server URL: {}", server_url);
     server_url
 }
 
@@ -384,8 +392,10 @@ pub async fn create_db(server_pool: &Pool, schema_name: &str) -> anyhow::Result<
         schema_name, SETTINGS_TABLE_NAME
     );
     let count: u64 = server_pool
-        .get_conn().await?
-        .query_first(check_query).await?
+        .get_conn()
+        .await?
+        .query_first(check_query)
+        .await?
         .unwrap_or(0);
 
     // Only insert if settings do not exist

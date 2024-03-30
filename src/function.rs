@@ -1,21 +1,27 @@
-use std::{collections::{HashMap, HashSet}, sync::Arc};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+};
 
 use anyhow::bail;
-use bc_components::{PublicKeyBase, PrivateKeyBase, ARID};
+use bc_components::{PrivateKeyBase, PublicKeyBase, ARID};
 use bc_envelope::prelude::*;
 use bytes::Bytes;
 use depo_api::{
+    util::{Abbrev, FlankedFunction},
     DeleteAccountRequest, DeleteAccountResponse, DeleteSharesRequest, DeleteSharesResponse,
     FinishRecoveryRequest, FinishRecoveryResponse, GetRecoveryRequest, GetRecoveryResponse,
     GetSharesRequest, GetSharesResponse, Receipt, StartRecoveryRequest, StartRecoveryResponse,
     StoreShareRequest, StoreShareResponse, UpdateKeyRequest, UpdateKeyResponse,
     UpdateRecoveryRequest, UpdateRecoveryResponse, DELETE_ACCOUNT_FUNCTION, DELETE_SHARES_FUNCTION,
     FINISH_RECOVERY_FUNCTION, GET_RECOVERY_FUNCTION, GET_SHARES_FUNCTION, KEY_PARAM,
-    START_RECOVERY_FUNCTION, STORE_SHARE_FUNCTION, UPDATE_KEY_FUNCTION, UPDATE_RECOVERY_FUNCTION, util::{Abbrev, FlankedFunction},
+    START_RECOVERY_FUNCTION, STORE_SHARE_FUNCTION, UPDATE_KEY_FUNCTION, UPDATE_RECOVERY_FUNCTION,
 };
-use log::{info, error};
+use log::{error, info};
 
-use crate::{depo_impl::DepoImpl, record::Record, recovery_continuation::RecoveryContinuation};
+use crate::{depo_impl::DepoImpl, record::Record};
+
+use crate::recovery_continuation::RecoveryContinuation;
 
 #[derive(Clone)]
 pub struct Depo(Arc<dyn DepoImpl + Send + Sync>);
@@ -54,7 +60,10 @@ impl Depo {
         }
     }
 
-    pub async fn handle_unverified_request(&self, encrypted_request: Envelope) -> anyhow::Result<Envelope> {
+    pub async fn handle_unverified_request(
+        &self,
+        encrypted_request: Envelope,
+    ) -> anyhow::Result<Envelope> {
         let decrypted_request = encrypted_request
             .decrypt_to_recipient(self.0.private_key())
             .map_err(|_| anyhow::anyhow!("request not encrypted to depository public key"))?;
@@ -82,7 +91,12 @@ impl Depo {
         Ok(signed_response)
     }
 
-    async fn handle_verified_request(&self, body: Envelope, request: Envelope, user_signing_key: &PublicKeyBase) -> anyhow::Result<Envelope> {
+    async fn handle_verified_request(
+        &self,
+        body: Envelope,
+        request: Envelope,
+        user_signing_key: &PublicKeyBase,
+    ) -> anyhow::Result<Envelope> {
         let function = &body.function()?;
 
         let response = if function == &STORE_SHARE_FUNCTION {
@@ -102,7 +116,8 @@ impl Depo {
         } else if function == &START_RECOVERY_FUNCTION {
             self.handle_start_recovery(&request).await?
         } else if function == &FINISH_RECOVERY_FUNCTION {
-            self.handle_finish_recovery(&request, user_signing_key).await?
+            self.handle_finish_recovery(&request, user_signing_key)
+                .await?
         } else {
             bail!("unknown function: {}", function.name());
         };
@@ -218,11 +233,16 @@ impl Depo {
         Ok(response_envelope)
     }
 
-    async fn handle_finish_recovery(&self, request: &Envelope, user_signing_key: &PublicKeyBase) -> anyhow::Result<Envelope> {
+    async fn handle_finish_recovery(
+        &self,
+        request: &Envelope,
+        user_signing_key: &PublicKeyBase,
+    ) -> anyhow::Result<Envelope> {
         let request = FinishRecoveryRequest::from_envelope(request.clone())?;
         info!("{}", request);
 
-        self.finish_recovery(request.continuation(), user_signing_key).await?;
+        self.finish_recovery(request.continuation(), user_signing_key)
+            .await?;
 
         let response = FinishRecoveryResponse::new(request.id().clone());
         info!("{}", response);
@@ -431,7 +451,11 @@ impl Depo {
 
     /// Completes a reset of the account's public key. This is called after the
     /// user has confirmed the change via their recovery contact method.
-    pub async fn finish_recovery(&self, continuation_envelope: &Envelope, user_signing_key: &PublicKeyBase) -> anyhow::Result<()> {
+    pub async fn finish_recovery(
+        &self,
+        continuation_envelope: &Envelope,
+        user_signing_key: &PublicKeyBase,
+    ) -> anyhow::Result<()> {
         let continuation: RecoveryContinuation = continuation_envelope
             .verify_and_decrypt(self.0.public_key(), self.0.private_key())?
             .try_into()?;
@@ -456,13 +480,20 @@ impl Depo {
     }
 }
 
-fn new_error_response(response_id: Option<&ARID>, function: Option<&str>, error: impl AsRef<str>) -> Envelope {
+fn new_error_response(
+    response_id: Option<&ARID>,
+    function: Option<&str>,
+    error: impl AsRef<str>,
+) -> Envelope {
     let function_string = match function {
         Some(function) => function.to_string(),
         None => "unknown".to_string(),
-    }.flanked_function();
+    }
+    .flanked_function();
     let message = format!("{} {}", function_string, error.as_ref());
-    let id_string = response_id.map(|id| id.abbrev()).unwrap_or_else(|| "unknown   ".to_string());
+    let id_string = response_id
+        .map(|id| id.abbrev())
+        .unwrap_or_else(|| "unknown   ".to_string());
     error!("{}: {}", id_string, message);
     Envelope::new_error_response(response_id, Some(message))
 }
