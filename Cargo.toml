@@ -1,6 +1,6 @@
 [package]
 name = "depo"
-version = "0.3.0"
+version = "0.3.1"
 edition = "2021"
 description = "Server for secure and anonymous storage and retrieval of binary objects."
 authors = ["Blockchain Commons"]
@@ -12,35 +12,35 @@ categories = ["cryptography", "database", "web-programming::http-server"]
 documentation = "https://docs.rs/depo"
 
 [dependencies]
-dcbor = { version = "0.13", features = ["multithreaded"] }
+dcbor = { version = "^0.13.0", features = ["multithreaded"] }
 # dcbor = { path = "../dcbor", features = ["multithreaded"] }
 
-bc-ur = "0.3"
+bc-ur = "^0.3.0"
 # bc-ur = { path = "../bc-ur" }
 
-bc-envelope = { version = "0.14", features = ["multithreaded"] }
+bc-envelope = { version = "^0.14.0", features = ["multithreaded"] }
 # bc-envelope = { path = "../bc-envelope", features = ["multithreaded"] }
 
-bc-components = "0.9"
+bc-components = "^0.9.0"
 # bc-components = { path = "../bc-components" }
 
-depo-api = { version = "0.3", features = ["multithreaded"] }
+depo-api = { version = "^0.3.0", features = ["multithreaded"] }
 # depo-api = { path = "../depo-api", features = ["multithreaded"] }
 
-warp = "0.3"
-tokio = { version = "1", features = ["full"] }
-mysql_async = "0.32"
-serde = { version = "1.0", features = ["derive"] }
-anyhow = "1.0"
-hex = "0.4.3"
-async-trait = "0.1.74"
-bytes = "1.5.0"
-url = "2.4.1"
-log = "0.4.20"
-env_logger = "0.10.1"
-nu-ansi-term = "0.49.0"
+warp = "^0.3.0"
+tokio = { version = "^1.0.0", features = ["full"] }
+mysql_async = "^0.32.0"
+serde = { version = "^1.0.0", features = ["derive"] }
+anyhow = "^1.0.0"
+hex = "^0.4.3"
+async-trait = "^0.1.74"
+bytes = "^1.5.0"
+url = "^2.4.1"
+log = "^0.4.20"
+env_logger = "^0.10.1"
+nu-ansi-term = "^0.49.0"
 
 [dev-dependencies]
-indoc = "2.0.4"
-hex-literal = "0.4.1"
-reqwest = "0.11.22"
+indoc = "^2.0.4"
+hex-literal = "^0.4.1"
+reqwest = "^0.11.22"
