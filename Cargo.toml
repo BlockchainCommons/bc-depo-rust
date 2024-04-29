@@ -1,6 +1,6 @@
 [package]
 name = "depo"
-version = "0.3.1"
+version = "0.3.2"
 edition = "2021"
 description = "Server for secure and anonymous storage and retrieval of binary objects."
 authors = ["Blockchain Commons"]
@@ -18,13 +18,13 @@ dcbor = { version = "^0.13.0", features = ["multithreaded"] }
 bc-ur = "^0.3.0"
 # bc-ur = { path = "../bc-ur" }
 
-bc-envelope = { version = "^0.14.0", features = ["multithreaded"] }
+bc-envelope = { version = "^0.15.0", features = ["multithreaded"] }
 # bc-envelope = { path = "../bc-envelope", features = ["multithreaded"] }
 
-bc-components = "^0.9.0"
+bc-components = "^0.10.0"
 # bc-components = { path = "../bc-components" }
 
-depo-api = { version = "^0.3.0", features = ["multithreaded"] }
+depo-api = { version = "^0.3.2", features = ["multithreaded"] }
 # depo-api = { path = "../depo-api", features = ["multithreaded"] }
 
 warp = "^0.3.0"
