@@ -1,6 +1,6 @@
 use std::{collections::HashSet, sync::Arc};
 
-use anyhow::anyhow;
+use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use bc_components::{PrivateKeyBase, PublicKeyBase, ARID};
 use bc_envelope::prelude::*;
@@ -33,12 +33,12 @@ struct DbDepoImpl {
 }
 
 impl DbDepoImpl {
-    async fn new(schema_name: impl AsRef<str>) -> anyhow::Result<Arc<Self>> {
+    async fn new(schema_name: impl AsRef<str>) -> Result<Arc<Self>> {
         let schema_name = schema_name.as_ref().to_string();
         let pool = db_pool(&schema_name);
         let (private_key, continuation_expiry_seconds, max_data_size) =
             get_settings(&pool, &schema_name).await?;
-        let public_key = private_key.public_keys();
+        let public_key = private_key.public_key();
         let public_key_string = public_key.ur_string();
         Ok(Arc::new(Self {
             schema_name,
@@ -59,7 +59,7 @@ impl DbDepoImpl {
 async fn get_settings(
     pool: &Pool,
     schema_name: &str,
-) -> anyhow::Result<(PrivateKeyBase, u32, u32)> {
+) -> Result<(PrivateKeyBase, u32, u32)> {
     let mut conn = pool.get_conn().await?;
     let query = format!(
         "SELECT private_key, continuation_expiry_seconds, max_data_size FROM {}.{}",
@@ -108,13 +108,13 @@ impl DepoImpl for DbDepoImpl {
         &self.public_key_string
     }
 
-    async fn existing_key_to_id(&self, public_key: &PublicKeyBase) -> anyhow::Result<Option<ARID>> {
+    async fn existing_key_to_id(&self, public_key: &PublicKeyBase) -> Result<Option<ARID>> {
         let user = key_to_user(&self.pool, public_key).await?;
         let id = user.map(|user| user.user_id().clone());
         Ok(id)
     }
 
-    async fn existing_id_to_user(&self, user_id: &ARID) -> anyhow::Result<Option<User>> {
+    async fn existing_id_to_user(&self, user_id: &ARID) -> Result<Option<User>> {
         let mut conn = self.pool.get_conn().await?;
         let query = "SELECT user_id, public_key, recovery FROM users WHERE user_id = :user_id";
         let params = params! {
@@ -129,7 +129,7 @@ impl DepoImpl for DbDepoImpl {
         }
     }
 
-    async fn insert_user(&self, user: &User) -> anyhow::Result<()> {
+    async fn insert_user(&self, user: &User) -> Result<()> {
         let mut conn = self.pool.get_conn().await?;
         let query = format!("INSERT INTO {}.{} (user_id, public_key, recovery) VALUES (:user_id, :public_key, :recovery)", self.schema_name(), USERS_TABLE_NAME);
         let params = params! {
@@ -143,7 +143,7 @@ impl DepoImpl for DbDepoImpl {
         Ok(())
     }
 
-    async fn insert_record(&self, record: &Record) -> anyhow::Result<()> {
+    async fn insert_record(&self, record: &Record) -> Result<()> {
         let mut conn = self.pool.get_conn().await?;
         let query = format!(
             r#"
@@ -154,7 +154,7 @@ impl DepoImpl for DbDepoImpl {
             RECORDS_TABLE_NAME
         );
         let params = params! {
-            "receipt" => record.receipt().envelope().ur_string(),
+            "receipt" => record.receipt().to_envelope().ur_string(),
             "user_id" => record.user_id().ur_string(),
             "data" => record.data().as_ref(),
         };
@@ -164,7 +164,7 @@ impl DepoImpl for DbDepoImpl {
         Ok(())
     }
 
-    async fn id_to_receipts(&self, user_id: &ARID) -> anyhow::Result<HashSet<Receipt>> {
+    async fn id_to_receipts(&self, user_id: &ARID) -> Result<HashSet<Receipt>> {
         let mut conn = self.pool.get_conn().await?;
         let query = "SELECT receipt FROM records WHERE user_id = :user_id";
         let params = params! {
@@ -176,18 +176,18 @@ impl DepoImpl for DbDepoImpl {
         for row in result {
             let receipt_string: String = row.get("receipt").unwrap();
             let receipt_envelope = Envelope::from_ur_string(receipt_string).unwrap();
-            let receipt = Receipt::from_envelope(receipt_envelope).unwrap();
+            let receipt: Receipt = receipt_envelope.try_into().unwrap();
             receipts.insert(receipt);
         }
 
         Ok(receipts)
     }
 
-    async fn receipt_to_record(&self, receipt: &Receipt) -> anyhow::Result<Option<Record>> {
+    async fn receipt_to_record(&self, receipt: &Receipt) -> Result<Option<Record>> {
         let mut conn = self.pool.get_conn().await?;
         let query = "SELECT user_id, data FROM records WHERE receipt = :receipt";
         let params = params! {
-            "receipt" => receipt.envelope().ur_string()
+            "receipt" => receipt.to_envelope().ur_string()
         };
 
         let result: Option<Row> = conn.exec_first(query, params).await?;
@@ -203,11 +203,11 @@ impl DepoImpl for DbDepoImpl {
         }
     }
 
-    async fn delete_record(&self, receipt: &Receipt) -> anyhow::Result<()> {
+    async fn delete_record(&self, receipt: &Receipt) -> Result<()> {
         let mut conn = self.pool.get_conn().await?;
         let query = "DELETE FROM records WHERE receipt = :receipt";
         let params = params! {
-            "receipt" => receipt.envelope().ur_string()
+            "receipt" => receipt.to_envelope().ur_string()
         };
 
         conn.exec_drop(query, params).await?;
@@ -219,7 +219,7 @@ impl DepoImpl for DbDepoImpl {
         &self,
         old_public_key: &PublicKeyBase,
         new_public_key: &PublicKeyBase,
-    ) -> anyhow::Result<()> {
+    ) -> Result<()> {
         let mut conn = self.pool.get_conn().await?;
         let query =
             "UPDATE users SET public_key = :new_public_key WHERE public_key = :old_public_key";
@@ -233,7 +233,7 @@ impl DepoImpl for DbDepoImpl {
         Ok(())
     }
 
-    async fn set_user_recovery(&self, user: &User, recovery: Option<&str>) -> anyhow::Result<()> {
+    async fn set_user_recovery(&self, user: &User, recovery: Option<&str>) -> Result<()> {
         let mut conn = self.pool.get_conn().await?;
         let query = "UPDATE users SET recovery = :recovery WHERE user_id = :user_id";
         let params = params! {
@@ -246,7 +246,7 @@ impl DepoImpl for DbDepoImpl {
         Ok(())
     }
 
-    async fn remove_user(&self, user: &User) -> anyhow::Result<()> {
+    async fn remove_user(&self, user: &User) -> Result<()> {
         let mut conn = self.pool.get_conn().await?;
         let query = "DELETE FROM users WHERE user_id = :user_id";
         let params = params! {
@@ -258,7 +258,7 @@ impl DepoImpl for DbDepoImpl {
         Ok(())
     }
 
-    async fn recovery_to_user(&self, recovery: &str) -> anyhow::Result<Option<User>> {
+    async fn recovery_to_user(&self, recovery: &str) -> Result<Option<User>> {
         let mut conn = self.pool.get_conn().await?;
         let query = "SELECT user_id, public_key, recovery FROM users WHERE recovery = :recovery";
         let params = params! {
@@ -285,7 +285,7 @@ fn row_to_user(row: Row) -> User {
 }
 
 impl Depo {
-    pub async fn new_db(schema_name: impl AsRef<str>) -> anyhow::Result<Self> {
+    pub async fn new_db(schema_name: impl AsRef<str>) -> Result<Self> {
         Ok(Self::new(DbDepoImpl::new(schema_name).await?))
     }
 }
@@ -293,7 +293,7 @@ impl Depo {
 pub async fn key_to_user(
     pool: &Pool,
     key: impl AsRef<PublicKeyBase>,
-) -> anyhow::Result<Option<User>> {
+) -> Result<Option<User>> {
     let mut conn = pool.get_conn().await?;
     let query = "SELECT user_id, public_key, recovery FROM users WHERE public_key = :key";
     let params = params! {
@@ -331,14 +331,14 @@ pub fn db_pool(schema_name: &str) -> Pool {
     Pool::new(database_url(schema_name).as_str())
 }
 
-pub async fn drop_db(server_pool: &Pool, schema_name: &str) -> anyhow::Result<()> {
+pub async fn drop_db(server_pool: &Pool, schema_name: &str) -> Result<()> {
     let query = format!("DROP DATABASE IF EXISTS {}", schema_name);
     server_pool.get_conn().await?.query_drop(query).await?;
 
     Ok(())
 }
 
-pub async fn create_db(server_pool: &Pool, schema_name: &str) -> anyhow::Result<()> {
+pub async fn create_db(server_pool: &Pool, schema_name: &str) -> Result<()> {
     let query = format!("CREATE DATABASE IF NOT EXISTS {}", schema_name);
     server_pool.get_conn().await?.query_drop(query).await?;
 
@@ -407,7 +407,7 @@ pub async fn create_db(server_pool: &Pool, schema_name: &str) -> anyhow::Result<
     Ok(())
 }
 
-pub async fn reset_db(schema_name: &str) -> anyhow::Result<()> {
+pub async fn reset_db(schema_name: &str) -> Result<()> {
     let server_pool = server_pool();
     drop_db(&server_pool, schema_name).await?;
     create_db(&server_pool, schema_name).await?;
@@ -415,14 +415,14 @@ pub async fn reset_db(schema_name: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
-pub async fn create_db_if_needed(schema_name: &str) -> anyhow::Result<()> {
+pub async fn create_db_if_needed(schema_name: &str) -> Result<()> {
     let server_pool = server_pool();
     create_db(&server_pool, schema_name).await?;
 
     Ok(())
 }
 
-pub async fn can_connect_to_db(schema_name: &str) -> anyhow::Result<bool> {
+pub async fn can_connect_to_db(schema_name: &str) -> Result<bool> {
     let pool = db_pool(schema_name);
     let mut conn = pool.get_conn().await?;
     conn.ping().await?;

@@ -10,6 +10,7 @@ use std::time::Duration;
 use url::Url;
 use bc_components::{PublicKeyBase, PrivateKeyBase};
 use nu_ansi_term::Color::{Cyan, Red, Yellow};
+use anyhow::Result;
 use depo_api::{
     request::store_share::StoreShareRequest, DeleteAccountRequest, DeleteSharesRequest,
     FinishRecoveryRequest, GetRecoveryRequest, GetRecoveryResponse, GetSharesRequest,
@@ -131,7 +132,7 @@ fn url(port: u16) -> Url {
     url
 }
 
-async fn get_public_key(client: &ClientRequestHandler) -> anyhow::Result<PublicKeyBase> {
+async fn get_public_key(client: &ClientRequestHandler) -> Result<PublicKeyBase> {
     let resp = client.client.get(url(client.port)).send().await?;
 
     assert_eq!(resp.status(), StatusCode::OK);
@@ -146,15 +147,15 @@ async fn server_call(
     depo_public_key: &PublicKeyBase,
     depo: &impl RequestHandler,
 ) -> Envelope {
-    let request = request.envelope();
-    let encrypted_request = request.sign_and_encrypt(client_private_key, depo_public_key).unwrap();
+    let request = request.into_envelope();
+    let encrypted_request = request.seal(client_private_key, depo_public_key).unwrap();
 
     let raw_response = depo.handle_encrypted_request(encrypted_request).await;
 
-    if raw_response.is_error() {
+    if raw_response.is_failure() {
         return raw_response;
     }
-    let response = raw_response.verify_and_decrypt(depo_public_key, client_private_key).unwrap();
+    let response = raw_response.unseal(depo_public_key, client_private_key).unwrap();
     assert_eq!(
         response.response_id().unwrap(),
         request.request_id().unwrap()
@@ -165,7 +166,7 @@ async fn server_call(
 pub async fn test_depo_scenario(depo_public_key: &PublicKeyBase, depo: &impl RequestHandler) {
     info!("{}", Cyan.paint("=== Alice stores a share"));
     let alice_private_key = PrivateKeyBase::new();
-    let alice_public_key = alice_private_key.public_keys();
+    let alice_public_key = alice_private_key.public_key();
     let alice_data_1 = Bytes::from_static(&hex!("cafebabe"));
     let request = StoreShareRequest::new(&alice_public_key, &alice_data_1);
     let response_envelope = server_call(request, &alice_private_key, depo_public_key, depo).await;
@@ -174,7 +175,7 @@ pub async fn test_depo_scenario(depo_public_key: &PublicKeyBase, depo: &impl Req
 
     info!("{}", Cyan.paint("=== Bob stores a share"));
     let bob_private_key = PrivateKeyBase::new();
-    let bob_public_key = bob_private_key.public_keys();
+    let bob_public_key = bob_private_key.public_key();
     let bob_data_1 = Bytes::from_static(&hex!("deadbeef"));
     let request = StoreShareRequest::new(&bob_public_key, &bob_data_1);
     let response_envelope = server_call(request, &bob_private_key, depo_public_key, depo).await;
@@ -223,20 +224,20 @@ pub async fn test_depo_scenario(depo_public_key: &PublicKeyBase, depo: &impl Req
 
     info!("{}", Red.paint("=== Someone attempts to retrieve all shares from a nonexistent account"));
     let nonexistent_private_key = PrivateKeyBase::new();
-    let nonexistent_public_key = nonexistent_private_key.public_keys();
+    let nonexistent_public_key = nonexistent_private_key.public_key();
     let request = GetSharesRequest::new(&nonexistent_public_key, vec![]);
     let response_envelope = server_call(request, &nonexistent_private_key, depo_public_key, depo).await;
-    assert!(response_envelope.error::<String>().unwrap().contains("unknown public key"));
+    assert!(response_envelope.extract_error::<String>().unwrap().contains("unknown public key"));
 
     info!("{}", Red.paint("=== Someone attempts to retrieve all shares from Alice's account using her public key"));
     let request = GetSharesRequest::new(&alice_public_key, vec![]);
     let response_envelope = server_call(request, &nonexistent_private_key, depo_public_key, depo).await;
-    assert!(response_envelope.error::<String>().unwrap().contains("request signature does not match request key"));
+    assert!(response_envelope.extract_error::<String>().unwrap().contains("could not verify a signature"));
 
     info!("{}", Red.paint("=== Alice attempts to retrieve her shares using the incorrect depo public key"));
     let request = GetSharesRequest::new(&alice_public_key, vec![]);
     let response_envelope = server_call(request, &alice_private_key, &nonexistent_public_key, depo).await;
-    assert!(response_envelope.error::<String>().unwrap().contains("request not encrypted to depository public key"));
+    assert!(response_envelope.extract_error::<String>().unwrap().contains("no recipient matches the given key"));
 
     info!("{}", Cyan.paint("=== Alice stores a share she's previously stored (idempotent)"));
     let request = StoreShareRequest::new(&alice_public_key, alice_data_1);
@@ -295,16 +296,16 @@ pub async fn test_depo_scenario(depo_public_key: &PublicKeyBase, depo: &impl Req
     info!("{}", Red.paint("=== Alice attempts to add a non-unique recovery method"));
     let request = UpdateRecoveryRequest::new(&alice_public_key, Some(bob_recovery));
     let response_envelope = server_call(request, &alice_private_key, depo_public_key, depo).await;
-    assert!(response_envelope.error::<String>().unwrap().contains("recovery method already exists"));
+    assert!(response_envelope.extract_error::<String>().unwrap().contains("recovery method already exists"));
 
     info!("{}", Red.paint("=== Someone attempts to retrieve the recovery method for a nonexistent account"));
     let request = GetRecoveryRequest::new(&nonexistent_public_key);
     let response_envelope = server_call(request, &nonexistent_private_key, depo_public_key, depo).await;
-    assert!(response_envelope.error::<String>().unwrap().contains("unknown public key"));
+    assert!(response_envelope.extract_error::<String>().unwrap().contains("unknown public key"));
 
     info!("{}", Cyan.paint("=== Alice updates her public key to a new one"));
     let alice_private_key_2 = PrivateKeyBase::new();
-    let alice_public_key_2 = alice_private_key_2.public_keys();
+    let alice_public_key_2 = alice_private_key_2.public_key();
     let request = UpdateKeyRequest::new(&alice_public_key, &alice_public_key_2);
     let response_envelope = server_call(request, &alice_private_key, depo_public_key, depo).await;
     assert!(response_envelope.is_result_ok().unwrap());
@@ -312,7 +313,7 @@ pub async fn test_depo_scenario(depo_public_key: &PublicKeyBase, depo: &impl Req
     info!("{}", Red.paint("=== Alice can no longer retrieve her shares using the old public key"));
     let request = GetSharesRequest::new(&alice_public_key, vec![]);
     let response_envelope = server_call(request, &alice_private_key, depo_public_key, depo).await;
-    assert!(response_envelope.error::<String>().unwrap().contains("unknown public key"));
+    assert!(response_envelope.extract_error::<String>().unwrap().contains("unknown public key"));
 
     info!("{}", Cyan.paint("=== Alice must now use her new public key"));
     let request = GetSharesRequest::new(&alice_public_key_2, vec![]);
@@ -322,13 +323,13 @@ pub async fn test_depo_scenario(depo_public_key: &PublicKeyBase, depo: &impl Req
 
     info!("{}", Cyan.paint("=== Bob has lost his public key, so he wants to replace it with a new one"));
     let bob_private_key_2 = PrivateKeyBase::new();
-    let bob_public_key_2 = bob_private_key_2.public_keys();
+    let bob_public_key_2 = bob_private_key_2.public_key();
 
     info!("{}", Red.paint("=== Bob requests transfer using an incorrect recovery method"));
     let incorrect_recovery = "wrong@example.com";
     let request = StartRecoveryRequest::new(&bob_public_key_2, incorrect_recovery);
     let response_envelope = server_call(request, &bob_private_key_2, depo_public_key, depo).await;
-    assert!(response_envelope.error::<String>().unwrap().contains("unknown recovery"));
+    assert!(response_envelope.extract_error::<String>().unwrap().contains("unknown recovery"));
 
     info!("{}", Cyan.paint("=== Bob requests a transfer using the correct recovery method"));
     let request = StartRecoveryRequest::new(&bob_public_key_2, bob_recovery);
@@ -347,7 +348,7 @@ pub async fn test_depo_scenario(depo_public_key: &PublicKeyBase, depo: &impl Req
     info!("{}", Red.paint("=== Bob attempts to use the recovery continuation to finish setting his new public key, but the request is signed by his old key"));
     let request = FinishRecoveryRequest::new(&bob_public_key, continuation.clone());
     let response_envelope = server_call(request, &bob_private_key, depo_public_key, depo).await;
-    assert!(response_envelope.error::<String>().unwrap().contains("invalid user signing key"));
+    assert!(response_envelope.extract_error::<String>().unwrap().contains("invalid user signing key"));
 
     info!("{}", Cyan.paint("=== Bob uses the recovery continuation to finish setting his new public key, properly signed by his new key"));
     let request = FinishRecoveryRequest::new(&bob_public_key_2, continuation);
@@ -357,7 +358,7 @@ pub async fn test_depo_scenario(depo_public_key: &PublicKeyBase, depo: &impl Req
     info!("{}", Red.paint("=== Bob can no longer retrieve his shares using the old public key"));
     let request = GetSharesRequest::new(&bob_public_key, vec![]);
     let response_envelope = server_call(request, &bob_private_key, depo_public_key, depo).await;
-    assert!(response_envelope.error::<String>().unwrap().contains("unknown public key"));
+    assert!(response_envelope.extract_error::<String>().unwrap().contains("unknown public key"));
 
     info!("{}", Cyan.paint("=== Bob must now use his new public key"));
     let request = GetSharesRequest::new(&bob_public_key_2, vec![]);
@@ -373,12 +374,12 @@ pub async fn test_depo_scenario(depo_public_key: &PublicKeyBase, depo: &impl Req
     info!("{}", Red.paint("=== Bob can no longer retrieve his shares using the new public key"));
     let request = GetSharesRequest::new(&bob_public_key_2, vec![]);
     let response_envelope = server_call(request, &bob_private_key_2, depo_public_key, depo).await;
-    assert!(response_envelope.error::<String>().unwrap().contains("unknown public key"));
+    assert!(response_envelope.extract_error::<String>().unwrap().contains("unknown public key"));
 
     info!("{}", Red.paint("=== Attempting to retrieve his recovery method now throws an error"));
     let request = GetRecoveryRequest::new(&bob_public_key_2);
     let response_envelope = server_call(request, &bob_private_key_2, depo_public_key, depo).await;
-    assert!(response_envelope.error::<String>().unwrap().contains("unknown public key"));
+    assert!(response_envelope.extract_error::<String>().unwrap().contains("unknown public key"));
 
     info!("{}", Cyan.paint("=== Deleting an account is idempotent"));
     let request = DeleteAccountRequest::new(&bob_public_key_2);

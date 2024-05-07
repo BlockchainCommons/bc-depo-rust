@@ -1,5 +1,6 @@
 use bc_components::PublicKeyBase;
 use bc_envelope::prelude::*;
+use anyhow::{Error, Result};
 
 #[derive(Clone, Debug)]
 pub struct RecoveryContinuation {
@@ -33,33 +34,21 @@ impl RecoveryContinuation {
     }
 }
 
-impl EnvelopeEncodable for RecoveryContinuation {
-    fn envelope(self) -> Envelope {
-        Envelope::new(self.old_key)
-            .add_parameter(Self::NEW_KEY_PARAM, self.new_key)
-            .add_parameter(Self::EXPIRY_PARAM, self.expiry)
-    }
-}
-
 impl From<RecoveryContinuation> for Envelope {
     fn from(request: RecoveryContinuation) -> Self {
-        request.envelope()
-    }
-}
-
-impl EnvelopeDecodable for RecoveryContinuation {
-    fn from_envelope(envelope: Envelope) -> anyhow::Result<Self> {
-        let old_key: PublicKeyBase = envelope.extract_subject()?;
-        let new_key: PublicKeyBase = envelope.extract_object_for_parameter(Self::NEW_KEY_PARAM)?;
-        let expiry: dcbor::Date = envelope.extract_object_for_parameter(Self::EXPIRY_PARAM)?;
-        Ok(Self::new(old_key, new_key, expiry))
+        Envelope::new(request.old_key)
+            .add_parameter(RecoveryContinuation::NEW_KEY_PARAM, request.new_key)
+            .add_parameter(RecoveryContinuation::EXPIRY_PARAM, request.expiry)
     }
 }
 
 impl TryFrom<Envelope> for RecoveryContinuation {
-    type Error = anyhow::Error;
+    type Error = Error;
 
-    fn try_from(envelope: Envelope) -> Result<Self, Self::Error> {
-        Self::from_envelope(envelope)
+    fn try_from(envelope: Envelope) -> Result<Self> {
+        let old_key: PublicKeyBase = envelope.extract_subject()?;
+        let new_key: PublicKeyBase = envelope.extract_object_for_parameter(Self::NEW_KEY_PARAM)?;
+        let expiry: dcbor::Date = envelope.extract_object_for_parameter(Self::EXPIRY_PARAM)?;
+        Ok(Self::new(old_key, new_key, expiry))
     }
 }

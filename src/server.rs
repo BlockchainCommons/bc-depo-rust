@@ -1,10 +1,11 @@
 use log::info;
 use warp::{Filter, http::StatusCode, reply::{self, Reply}, reject::Rejection};
 use nu_ansi_term::Color::Green;
+use anyhow::Result;
 
 use crate::{reset_db, Depo, db_depo::{create_db, server_pool}};
 
-pub async fn start_server(schema_name: &str, port: u16) -> anyhow::Result<()> {
+pub async fn start_server(schema_name: &str, port: u16) -> Result<()> {
     create_db(&server_pool(), schema_name).await?;
 
     let depo = Depo::new_db(schema_name).await?;
@@ -76,6 +77,6 @@ async fn reset_db_handler(schema_name: String) -> Result<Box<dyn Reply>, Rejecti
 struct InvalidBody;
 impl warp::reject::Reject for InvalidBody {}
 
-#[derive(Debug)]
-struct AnyhowError(anyhow::Error);
-impl warp::reject::Reject for AnyhowError {}
+// #[derive(Debug)]
+// struct AnyhowError(Error);
+// impl warp::reject::Reject for AnyhowError {}

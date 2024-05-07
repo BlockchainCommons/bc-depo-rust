@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use anyhow::bail;
+use anyhow::{bail, Result};
 use async_trait::async_trait;
 use bc_components::{PublicKeyBase, ARID, PrivateKeyBase};
 use depo_api::{receipt::Receipt, util::Abbrev};
@@ -14,19 +14,19 @@ pub trait DepoImpl {
     fn private_key(&self) -> &PrivateKeyBase;
     fn public_key(&self) -> &PublicKeyBase;
     fn public_key_string(&self) -> &str;
-    async fn existing_key_to_id(&self, key: &PublicKeyBase) -> anyhow::Result<Option<ARID>>;
-    async fn existing_id_to_user(&self, user_id: &ARID) -> anyhow::Result<Option<User>>;
-    async fn insert_user(&self, user: &User) -> anyhow::Result<()>;
-    async fn insert_record(&self, record: &Record) -> anyhow::Result<()>;
-    async fn id_to_receipts(&self, user_id: &ARID) -> anyhow::Result<HashSet<Receipt>>;
-    async fn receipt_to_record(&self, receipt: &Receipt) -> anyhow::Result<Option<Record>>;
-    async fn delete_record(&self, receipt: &Receipt) -> anyhow::Result<()>;
-    async fn set_user_key(&self, old_key: &PublicKeyBase, new_key: &PublicKeyBase) -> anyhow::Result<()>;
-    async fn set_user_recovery(&self, user: &User, recovery: Option<&str>) -> anyhow::Result<()>;
-    async fn remove_user(&self, user: &User) -> anyhow::Result<()>;
-    async fn recovery_to_user(&self, recovery: &str) -> anyhow::Result<Option<User>>;
+    async fn existing_key_to_id(&self, key: &PublicKeyBase) -> Result<Option<ARID>>;
+    async fn existing_id_to_user(&self, user_id: &ARID) -> Result<Option<User>>;
+    async fn insert_user(&self, user: &User) -> Result<()>;
+    async fn insert_record(&self, record: &Record) -> Result<()>;
+    async fn id_to_receipts(&self, user_id: &ARID) -> Result<HashSet<Receipt>>;
+    async fn receipt_to_record(&self, receipt: &Receipt) -> Result<Option<Record>>;
+    async fn delete_record(&self, receipt: &Receipt) -> Result<()>;
+    async fn set_user_key(&self, old_key: &PublicKeyBase, new_key: &PublicKeyBase) -> Result<()>;
+    async fn set_user_recovery(&self, user: &User, recovery: Option<&str>) -> Result<()>;
+    async fn remove_user(&self, user: &User) -> Result<()>;
+    async fn recovery_to_user(&self, recovery: &str) -> Result<Option<User>>;
 
-    async fn records_for_id_and_receipts(&self, user_id: &ARID, recipts: &HashSet<Receipt>) -> anyhow::Result<Vec<Record>> {
+    async fn records_for_id_and_receipts(&self, user_id: &ARID, recipts: &HashSet<Receipt>) -> Result<Vec<Record>> {
         let mut result = Vec::new();
         let user_receipts = self.id_to_receipts(user_id).await?;
         for receipt in recipts {
@@ -40,7 +40,7 @@ pub trait DepoImpl {
         Ok(result)
     }
 
-    async fn existing_key_to_user(&self, key: &PublicKeyBase) -> anyhow::Result<Option<User>> {
+    async fn existing_key_to_user(&self, key: &PublicKeyBase) -> Result<Option<User>> {
         let user_id = self.existing_key_to_id(key).await?;
         let user = match user_id {
             Some(user_id) => self.existing_id_to_user(&user_id).await?,
@@ -49,7 +49,7 @@ pub trait DepoImpl {
         Ok(user)
     }
 
-    async fn key_to_user(&self, key: &PublicKeyBase) -> anyhow::Result<User> {
+    async fn key_to_user(&self, key: &PublicKeyBase) -> Result<User> {
         let user = self.existing_key_to_user(key).await?;
         let user = match user {
             Some(user_id) => user_id,
@@ -63,7 +63,7 @@ pub trait DepoImpl {
         Ok(user)
     }
 
-    async fn expect_key_to_user(&self, key: &PublicKeyBase) -> anyhow::Result<User> {
+    async fn expect_key_to_user(&self, key: &PublicKeyBase) -> Result<User> {
         let user_id = self.existing_key_to_user(key).await?;
         let user_id = match user_id {
             Some(user_id) => user_id,

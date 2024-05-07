@@ -5,6 +5,7 @@ use bc_components::{PublicKeyBase, PrivateKeyBase, ARID};
 use tokio::sync::RwLock;
 use depo_api::receipt::Receipt;
 use bc_envelope::prelude::*;
+use anyhow::Result;
 
 use crate::{depo_impl::DepoImpl, user::User, record::Record, function::Depo, MAX_DATA_SIZE, CONTINUATION_EXPIRY_SECONDS};
 
@@ -26,7 +27,7 @@ struct MemDepoImpl {
 impl MemDepoImpl {
     fn new() -> Arc<Self> {
         let private_key = PrivateKeyBase::new();
-        let public_key = private_key.public_keys();
+        let public_key = private_key.public_key();
         let public_key_string = public_key.ur_string();
         Arc::new(Self {
             private_key,
@@ -81,15 +82,15 @@ impl DepoImpl for MemDepoImpl {
         &self.public_key_string
     }
 
-    async fn existing_key_to_id(&self, public_key: &PublicKeyBase) -> anyhow::Result<Option<ARID>> {
+    async fn existing_key_to_id(&self, public_key: &PublicKeyBase) -> Result<Option<ARID>> {
         Ok(self.inner.read().await.public_key_to_id.get(public_key).cloned())
     }
 
-    async fn existing_id_to_user(&self, user_id: &ARID) -> anyhow::Result<Option<User>> {
+    async fn existing_id_to_user(&self, user_id: &ARID) -> Result<Option<User>> {
         Ok(self.inner.read().await.id_to_user.get(user_id).cloned())
     }
 
-    async fn insert_user(&self, user: &User) -> anyhow::Result<()> {
+    async fn insert_user(&self, user: &User) -> Result<()> {
         let mut write = self.inner.write().await;
         write.id_to_user.insert(user.user_id().clone(), user.clone());
         write.public_key_to_id.insert(user.public_key().clone(), user.user_id().clone());
@@ -97,7 +98,7 @@ impl DepoImpl for MemDepoImpl {
         Ok(())
     }
 
-    async fn insert_record(&self, record: &Record) -> anyhow::Result<()> {
+    async fn insert_record(&self, record: &Record) -> Result<()> {
         let mut write = self.inner.write().await;
         let receipt = record.receipt();
         write.receipt_to_record.insert(receipt.clone(), record.clone());
@@ -105,17 +106,17 @@ impl DepoImpl for MemDepoImpl {
         Ok(())
     }
 
-    async fn id_to_receipts(&self, user_id: &ARID) -> anyhow::Result<HashSet<Receipt>> {
+    async fn id_to_receipts(&self, user_id: &ARID) -> Result<HashSet<Receipt>> {
         Ok(self.inner.read().await.id_to_receipts.get(user_id).unwrap().clone())
     }
 
-    async fn receipt_to_record(&self, receipt: &Receipt) -> anyhow::Result<Option<Record>> {
+    async fn receipt_to_record(&self, receipt: &Receipt) -> Result<Option<Record>> {
         let read = self.inner.read().await;
         let record = read.receipt_to_record.get(receipt);
         Ok(record.cloned())
     }
 
-    async fn delete_record(&self, receipt: &Receipt) -> anyhow::Result<()> {
+    async fn delete_record(&self, receipt: &Receipt) -> Result<()> {
         let record = self.receipt_to_record(receipt).await?;
         if let Some(record) = record {
             let mut write = self.inner.write().await;
@@ -125,7 +126,7 @@ impl DepoImpl for MemDepoImpl {
         Ok(())
     }
 
-    async fn set_user_key(&self, old_public_key: &PublicKeyBase, new_public_key: &PublicKeyBase) -> anyhow::Result<()> {
+    async fn set_user_key(&self, old_public_key: &PublicKeyBase, new_public_key: &PublicKeyBase) -> Result<()> {
         let user = self.expect_key_to_user(old_public_key).await?;
         let mut write = self.inner.write().await;
         write.public_key_to_id.remove(old_public_key);
@@ -135,7 +136,7 @@ impl DepoImpl for MemDepoImpl {
         Ok(())
     }
 
-    async fn set_user_recovery(&self, user: &User, recovery: Option<&str>) -> anyhow::Result<()> {
+    async fn set_user_recovery(&self, user: &User, recovery: Option<&str>) -> Result<()> {
         let mut write = self.inner.write().await;
 
         // get the user's existing recovery
@@ -158,7 +159,7 @@ impl DepoImpl for MemDepoImpl {
         Ok(())
     }
 
-    async fn remove_user(&self, user: &User) -> anyhow::Result<()> {
+    async fn remove_user(&self, user: &User) -> Result<()> {
         let mut write = self.inner.write().await;
 
         write.public_key_to_id.remove(user.public_key());
@@ -168,7 +169,7 @@ impl DepoImpl for MemDepoImpl {
         Ok(())
     }
 
-    async fn recovery_to_user(&self, recovery: &str) -> anyhow::Result<Option<User>> {
+    async fn recovery_to_user(&self, recovery: &str) -> Result<Option<User>> {
         let read = self.inner.read().await;
         let user_id = read.recovery_to_id
             .get(recovery);

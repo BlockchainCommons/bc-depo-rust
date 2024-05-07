@@ -1,16 +1,16 @@
 use std::{collections::{HashMap, HashSet}, sync::Arc};
 
-use anyhow::bail;
+use anyhow::{bail, Result};
 use bc_components::{PublicKeyBase, PrivateKeyBase, ARID};
 use bc_envelope::prelude::*;
 use bytes::Bytes;
 use depo_api::{
-    DeleteAccountRequest, DeleteAccountResponse, DeleteSharesRequest, DeleteSharesResponse,
-    FinishRecoveryRequest, FinishRecoveryResponse, GetRecoveryRequest, GetRecoveryResponse,
+    DeleteAccountRequest, DeleteSharesRequest,
+    FinishRecoveryRequest, GetRecoveryRequest,
     GetSharesRequest, GetSharesResponse, Receipt, StartRecoveryRequest, StartRecoveryResponse,
-    StoreShareRequest, StoreShareResponse, UpdateKeyRequest, UpdateKeyResponse,
-    UpdateRecoveryRequest, UpdateRecoveryResponse, DELETE_ACCOUNT_FUNCTION, DELETE_SHARES_FUNCTION,
-    FINISH_RECOVERY_FUNCTION, GET_RECOVERY_FUNCTION, GET_SHARES_FUNCTION, KEY_PARAM,
+    StoreShareRequest, StoreShareResponse, UpdateKeyRequest,
+    UpdateRecoveryRequest, DELETE_ACCOUNT_FUNCTION, DELETE_SHARES_FUNCTION,
+    FINISH_RECOVERY_FUNCTION, GET_RECOVERY_FUNCTION, GET_SHARES_FUNCTION,
     START_RECOVERY_FUNCTION, STORE_SHARE_FUNCTION, UPDATE_KEY_FUNCTION, UPDATE_RECOVERY_FUNCTION, util::{Abbrev, FlankedFunction},
 };
 use log::{info, error};
@@ -54,23 +54,9 @@ impl Depo {
         }
     }
 
-    pub async fn handle_unverified_request(&self, encrypted_request: Envelope) -> anyhow::Result<Envelope> {
-        let decrypted_request = encrypted_request
-            .decrypt_to_recipient(self.0.private_key())
-            .map_err(|_| anyhow::anyhow!("request not encrypted to depository public key"))?;
-        let signed_request = decrypted_request.unwrap_envelope()?;
-
-        // Verify that the key in the request is the same as the key used to sign the request
-        let request = signed_request.unwrap_envelope()?;
-        let body = request.request_body()?;
-        let key: PublicKeyBase = body.extract_object_for_parameter(KEY_PARAM)?;
-        let id = request.request_id()?;
-        let function = body.function()?;
-        signed_request
-            .verify_signature_from(&key)
-            .map_err(|_| anyhow::anyhow!("request signature does not match request key"))?;
-
-        let unsigned_response = match self.handle_verified_request(body, request, &key).await {
+    pub async fn handle_unverified_request(&self, encrypted_request: Envelope) -> Result<Envelope> {
+        let (id, sender, body, function) = encrypted_request.parse_sealed_transaction_request(None, self.0.private_key())?;
+        let unsigned_response = match self.handle_verified_request(id.clone(), sender.clone(), body, function.clone()).await {
             Ok(success_response) => success_response,
             Err(e) => {
                 let function_name = function.named_name().unwrap_or("unknown".to_string());
@@ -78,31 +64,29 @@ impl Depo {
             }
         };
 
-        let signed_response = unsigned_response.sign_and_encrypt(self.0.private_key(), &key)?;
+        let signed_response = unsigned_response.seal(self.0.private_key(), &sender)?;
         Ok(signed_response)
     }
 
-    async fn handle_verified_request(&self, body: Envelope, request: Envelope, user_signing_key: &PublicKeyBase) -> anyhow::Result<Envelope> {
-        let function = &body.function()?;
-
-        let response = if function == &STORE_SHARE_FUNCTION {
-            self.handle_store_share(&request).await?
-        } else if function == &GET_SHARES_FUNCTION {
-            self.handle_get_shares(&request).await?
-        } else if function == &DELETE_SHARES_FUNCTION {
-            self.handle_delete_shares(&request).await?
-        } else if function == &UPDATE_KEY_FUNCTION {
-            self.handle_update_key(&request).await?
-        } else if function == &DELETE_ACCOUNT_FUNCTION {
-            self.handle_delete_account(&request).await?
-        } else if function == &UPDATE_RECOVERY_FUNCTION {
-            self.handle_update_recovery(&request).await?
-        } else if function == &GET_RECOVERY_FUNCTION {
-            self.handle_get_recovery(&request).await?
-        } else if function == &START_RECOVERY_FUNCTION {
-            self.handle_start_recovery(&request).await?
-        } else if function == &FINISH_RECOVERY_FUNCTION {
-            self.handle_finish_recovery(&request, user_signing_key).await?
+    async fn handle_verified_request(&self, id: ARID, sender: PublicKeyBase, body: Envelope, function: Function) -> Result<Envelope> {
+        let response = if function == STORE_SHARE_FUNCTION {
+            self.handle_store_share(id, sender, body).await?
+        } else if function == GET_SHARES_FUNCTION {
+            self.handle_get_shares(id, sender, body).await?
+        } else if function == DELETE_SHARES_FUNCTION {
+            self.handle_delete_shares(id, sender, body).await?
+        } else if function == UPDATE_KEY_FUNCTION {
+            self.handle_update_key(id, sender, body).await?
+        } else if function == DELETE_ACCOUNT_FUNCTION {
+            self.handle_delete_account(id, sender, body).await?
+        } else if function == UPDATE_RECOVERY_FUNCTION {
+            self.handle_update_recovery(id, sender, body).await?
+        } else if function == GET_RECOVERY_FUNCTION {
+            self.handle_get_recovery(id, sender, body).await?
+        } else if function == START_RECOVERY_FUNCTION {
+            self.handle_start_recovery(id, sender, body).await?
+        } else if function == FINISH_RECOVERY_FUNCTION {
+            self.handle_finish_recovery(id, sender, body).await?
         } else {
             bail!("unknown function: {}", function.name());
         };
@@ -110,8 +94,8 @@ impl Depo {
         Ok(response)
     }
 
-    async fn handle_store_share(&self, request: &Envelope) -> anyhow::Result<Envelope> {
-        let request = StoreShareRequest::from_envelope(request.clone())?;
+    async fn handle_store_share(&self, id: ARID, key: PublicKeyBase, body: Envelope) -> Result<Envelope> {
+        let request = StoreShareRequest::from_body(id, key, body)?;
         info!("{}", request);
 
         let receipt = self.store_share(request.key(), request.data()).await?;
@@ -119,12 +103,12 @@ impl Depo {
         let response = StoreShareResponse::new(request.id().clone(), receipt);
         info!("{}", response);
 
-        let response_envelope = response.clone().envelope();
+        let response_envelope = response.to_envelope();
         Ok(response_envelope)
     }
 
-    async fn handle_get_shares(&self, request: &Envelope) -> anyhow::Result<Envelope> {
-        let request = GetSharesRequest::from_envelope(request.clone())?;
+    async fn handle_get_shares(&self, id: ARID, key: PublicKeyBase, body: Envelope) -> Result<Envelope> {
+        let request = GetSharesRequest::from_body(id, key, body)?;
         info!("{}", request);
 
         let receipt_to_data = self.get_shares(request.key(), request.receipts()).await?;
@@ -136,75 +120,55 @@ impl Depo {
         Ok(response_envelope)
     }
 
-    async fn handle_delete_shares(&self, request: &Envelope) -> anyhow::Result<Envelope> {
-        let request = DeleteSharesRequest::from_envelope(request.clone())?;
+    async fn handle_delete_shares(&self, id: ARID, key: PublicKeyBase, body: Envelope) -> Result<Envelope> {
+        let request = DeleteSharesRequest::from_body(id, key, body)?;
         info!("{}", request);
 
         self.delete_shares(request.key(), request.receipts())
             .await?;
 
-        let response = DeleteSharesResponse::new(request.id().clone());
-        info!("{}", response);
-
-        let response_envelope = response.into();
-        Ok(response_envelope)
+        Ok(Envelope::new_success_response(request.id(), None))
     }
 
-    async fn handle_update_key(&self, request: &Envelope) -> anyhow::Result<Envelope> {
-        let request = UpdateKeyRequest::from_envelope(request.clone())?;
+    async fn handle_update_key(&self, id: ARID, key: PublicKeyBase, body: Envelope) -> Result<Envelope> {
+        let request = UpdateKeyRequest::from_body(id, key, body)?;
         info!("{}", request);
 
         self.update_key(request.key(), request.new_key()).await?;
 
-        let response = UpdateKeyResponse::new(request.id().clone());
-        info!("{}", response);
-
-        let response_envelope = response.into();
-        Ok(response_envelope)
+        Ok(Envelope::new_success_response(request.id(), None))
     }
 
-    async fn handle_delete_account(&self, request: &Envelope) -> anyhow::Result<Envelope> {
-        let request = DeleteAccountRequest::from_envelope(request.clone())?;
+    async fn handle_delete_account(&self, id: ARID, key: PublicKeyBase, body: Envelope) -> Result<Envelope> {
+        let request = DeleteAccountRequest::from_body(id, key, body)?;
         info!("{}", request);
 
         self.delete_account(request.key()).await?;
 
-        let response = DeleteAccountResponse::new(request.id().clone());
-        info!("{}", response);
-
-        let response_envelope = response.into();
-        Ok(response_envelope)
+        Ok(Envelope::new_success_response(request.id(), None))
     }
 
-    async fn handle_update_recovery(&self, request: &Envelope) -> anyhow::Result<Envelope> {
-        let request = UpdateRecoveryRequest::from_envelope(request.clone())?;
+    async fn handle_update_recovery(&self, id: ARID, key: PublicKeyBase, body: Envelope) -> Result<Envelope> {
+        let request = UpdateRecoveryRequest::from_body(id, key, body)?;
         info!("{}", request);
 
         self.update_recovery(request.key(), request.recovery().map(|x| x.as_str()))
             .await?;
 
-        let response = UpdateRecoveryResponse::new(request.id().clone());
-        info!("{}", response);
-
-        let response_envelope = response.into();
-        Ok(response_envelope)
+        Ok(Envelope::new_success_response(request.id(), None))
     }
 
-    async fn handle_get_recovery(&self, request: &Envelope) -> anyhow::Result<Envelope> {
-        let request = GetRecoveryRequest::from_envelope(request.clone())?;
+    async fn handle_get_recovery(&self, id: ARID, key: PublicKeyBase, body: Envelope) -> Result<Envelope> {
+        let request = GetRecoveryRequest::from_body(id, key, body)?;
         info!("{}", request);
 
         let recovery_method = self.get_recovery(request.key()).await?;
 
-        let response = GetRecoveryResponse::new(request.id().clone(), recovery_method);
-        info!("{}", response);
-
-        let response_envelope = response.into();
-        Ok(response_envelope)
+        Ok(Envelope::new_or_null(recovery_method).into_success_response(request.id()))
     }
 
-    async fn handle_start_recovery(&self, request: &Envelope) -> anyhow::Result<Envelope> {
-        let request = StartRecoveryRequest::from_envelope(request.clone())?;
+    async fn handle_start_recovery(&self, id: ARID, key: PublicKeyBase, body: Envelope) -> Result<Envelope> {
+        let request = StartRecoveryRequest::from_body(id, key, body)?;
         info!("{}", request);
 
         let continuation = self
@@ -218,17 +182,13 @@ impl Depo {
         Ok(response_envelope)
     }
 
-    async fn handle_finish_recovery(&self, request: &Envelope, user_signing_key: &PublicKeyBase) -> anyhow::Result<Envelope> {
-        let request = FinishRecoveryRequest::from_envelope(request.clone())?;
+    async fn handle_finish_recovery(&self, id: ARID, key: PublicKeyBase, body: Envelope) -> Result<Envelope> {
+        let request = FinishRecoveryRequest::from_body(id, key.clone(), body)?;
         info!("{}", request);
 
-        self.finish_recovery(request.continuation(), user_signing_key).await?;
+        self.finish_recovery(request.continuation(), &key).await?;
 
-        let response = FinishRecoveryResponse::new(request.id().clone());
-        info!("{}", response);
-
-        let response_envelope = response.into();
-        Ok(response_envelope)
+        Ok(Envelope::new_success_response(request.id(), None))
     }
 }
 
@@ -237,7 +197,7 @@ impl Depo {
     /// recognized, then a new account is created and the provided data is stored in
     /// it. It is also used to add additional shares to an existing account. Adding an
     /// already existing share to an account is idempotent.
-    pub async fn store_share(&self, key: &PublicKeyBase, data: &Bytes) -> anyhow::Result<Receipt> {
+    pub async fn store_share(&self, key: &PublicKeyBase, data: &Bytes) -> Result<Receipt> {
         let user = self.0.key_to_user(key).await?;
         if data.len() > self.0.max_data_size() as usize {
             bail!("data too large");
@@ -255,7 +215,7 @@ impl Depo {
         &self,
         key: &PublicKeyBase,
         receipts: &HashSet<Receipt>,
-    ) -> anyhow::Result<HashMap<Receipt, Bytes>> {
+    ) -> Result<HashMap<Receipt, Bytes>> {
         let user = self.0.expect_key_to_user(key).await?;
         let receipts = if receipts.is_empty() {
             self.0.id_to_receipts(user.user_id()).await?
@@ -275,7 +235,7 @@ impl Depo {
 
     /// Returns a single share corresponding to the provided receipt. Attempting to
     /// retrieve a nonexistent receipt or a receipt from the wrong account is an error.
-    pub async fn get_share(&self, key: &PublicKeyBase, receipt: &Receipt) -> anyhow::Result<Bytes> {
+    pub async fn get_share(&self, key: &PublicKeyBase, receipt: &Receipt) -> Result<Bytes> {
         let mut receipts = HashSet::new();
         receipts.insert(receipt.clone());
         let result = self.get_shares(key, &receipts).await?;
@@ -293,7 +253,7 @@ impl Depo {
         &self,
         key: &PublicKeyBase,
         receipts: &HashSet<Receipt>,
-    ) -> anyhow::Result<()> {
+    ) -> Result<()> {
         let user = self.0.expect_key_to_user(key).await?;
         let recpts = if receipts.is_empty() {
             self.0.id_to_receipts(user.user_id()).await?
@@ -310,7 +270,7 @@ impl Depo {
 
     /// Deletes a single share a user controls. Deletes are idempotent; in other words,
     /// deleting a nonexistent share is not an error.
-    pub async fn delete_share(&self, key: &PublicKeyBase, receipt: &Receipt) -> anyhow::Result<()> {
+    pub async fn delete_share(&self, key: &PublicKeyBase, receipt: &Receipt) -> Result<()> {
         let mut receipts = HashSet::new();
         receipts.insert(receipt.clone());
         self.delete_shares(key, &receipts).await?;
@@ -325,7 +285,7 @@ impl Depo {
         &self,
         old_key: &PublicKeyBase,
         new_key: &PublicKeyBase,
-    ) -> anyhow::Result<()> {
+    ) -> Result<()> {
         if self.0.existing_key_to_id(new_key).await?.is_some() {
             bail!("public key already in use");
         }
@@ -336,7 +296,7 @@ impl Depo {
     /// Deletes all the shares of an account and any other data associated with it, such
     /// as the recovery contact method. Deleting an account is idempotent; in other words,
     /// deleting a nonexistent account is not an error.
-    pub async fn delete_account(&self, key: &PublicKeyBase) -> anyhow::Result<()> {
+    pub async fn delete_account(&self, key: &PublicKeyBase) -> Result<()> {
         if let Some(user) = self.0.existing_key_to_user(key).await? {
             self.delete_shares(key, &HashSet::new()).await?;
             self.0.remove_user(&user).await?;
@@ -360,7 +320,7 @@ impl Depo {
         &self,
         key: &PublicKeyBase,
         recovery: Option<&str>,
-    ) -> anyhow::Result<()> {
+    ) -> Result<()> {
         let user = self.0.expect_key_to_user(key).await?;
         // Recovery methods must be unique
         if let Some(non_opt_recovery) = recovery {
@@ -380,7 +340,7 @@ impl Depo {
     }
 
     /// Retrieves an account's recovery contact method, if any.
-    pub async fn get_recovery(&self, key: &PublicKeyBase) -> anyhow::Result<Option<String>> {
+    pub async fn get_recovery(&self, key: &PublicKeyBase) -> Result<Option<String>> {
         let user = self.0.expect_key_to_user(key).await?;
         let recovery = user.recovery().map(|s| s.to_string());
         Ok(recovery)
@@ -405,7 +365,7 @@ impl Depo {
         &self,
         recovery: impl AsRef<str>,
         new_key: &PublicKeyBase,
-    ) -> anyhow::Result<Envelope> {
+    ) -> Result<Envelope> {
         // First find the user for the recovery.
         let user = self.0.recovery_to_user(recovery.as_ref()).await?;
         // If no recovery was found return an error.
@@ -424,16 +384,16 @@ impl Depo {
             dcbor::Date::now() + self.0.continuation_expiry_seconds() as f64,
         );
         let continuation_envelope = recovery_continuation
-            .envelope()
-            .sign_and_encrypt(self.0.private_key(), self.0.public_key())?;
+            .to_envelope()
+            .seal(self.0.private_key(), self.0.public_key())?;
         Ok(continuation_envelope)
     }
 
     /// Completes a reset of the account's public key. This is called after the
     /// user has confirmed the change via their recovery contact method.
-    pub async fn finish_recovery(&self, continuation_envelope: &Envelope, user_signing_key: &PublicKeyBase) -> anyhow::Result<()> {
+    pub async fn finish_recovery(&self, continuation_envelope: &Envelope, user_signing_key: &PublicKeyBase) -> Result<()> {
         let continuation: RecoveryContinuation = continuation_envelope
-            .verify_and_decrypt(self.0.public_key(), self.0.private_key())?
+            .unseal(self.0.public_key(), self.0.private_key())?
             .try_into()?;
         // Ensure the continuation is valid
         let seconds_until_expiry = continuation.expiry().clone() - dcbor::Date::now();
@@ -464,5 +424,5 @@ fn new_error_response(response_id: Option<&ARID>, function: Option<&str>, error:
     let message = format!("{} {}", function_string, error.as_ref());
     let id_string = response_id.map(|id| id.abbrev()).unwrap_or_else(|| "unknown   ".to_string());
     error!("{}: {}", id_string, message);
-    Envelope::new_error_response(response_id, Some(message))
+    message.to_envelope().into_failure_response(response_id)
 }

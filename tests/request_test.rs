@@ -11,29 +11,29 @@ fn test_depo_requests() {
     ))
     .unwrap();
     let private_key = PrivateKeyBase::new();
-    let key = private_key.public_keys();
+    let key = private_key.public_key();
     let data = Bytes::from_static(b"data");
-    let request = StoreShareRequest::new_opt(id, key, data);
+    let request = StoreShareRequest::from_fields(id, key, data);
     assert_eq!(
-        request.clone().envelope().format(),
+        request.to_envelope().format(),
         indoc! {r#"
         request(ARID(8712dfac)) [
             'body': «"storeShare"» [
                 ❰"data"❱: Bytes(4)
-                ❰"key"❱: PublicKeyBase
             ]
+            'senderPublicKey': PublicKeyBase
         ]
         "#}
         .trim()
     );
 
     let server_private_key = PrivateKeyBase::new();
-    let server_public_key = server_private_key.public_keys();
+    let server_public_key = server_private_key.public_key();
 
     let encrypted_request = request
         .clone()
-        .envelope()
-        .sign_and_encrypt(&private_key, &server_public_key)
+        .to_envelope()
+        .seal(&private_key, &server_public_key)
         .unwrap();
     assert_eq!(
         encrypted_request.format(),
@@ -57,8 +57,8 @@ fn test_depo_requests() {
             request(ARID(8712dfac)) [
                 'body': «"storeShare"» [
                     ❰"data"❱: Bytes(4)
-                    ❰"key"❱: PublicKeyBase
                 ]
+                'senderPublicKey': PublicKeyBase
             ]
         } [
             'verifiedBy': Signature
