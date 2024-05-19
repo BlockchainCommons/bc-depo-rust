@@ -66,7 +66,7 @@ impl DepoImpl for MemDepoImpl {
         MAX_DATA_SIZE
     }
 
-    fn continuation_expiry_seconds(&self) -> u32 {
+    fn continuation_expiry_seconds(&self) -> u64 {
         CONTINUATION_EXPIRY_SECONDS
     }
 

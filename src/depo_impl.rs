@@ -10,7 +10,7 @@ use crate::{user::User, record::Record};
 #[async_trait]
 pub trait DepoImpl {
     fn max_data_size(&self) -> u32;
-    fn continuation_expiry_seconds(&self) -> u32;
+    fn continuation_expiry_seconds(&self) -> u64;
     fn private_key(&self) -> &PrivateKeyBase;
     fn public_key(&self) -> &PublicKeyBase;
     fn public_key_string(&self) -> &str;

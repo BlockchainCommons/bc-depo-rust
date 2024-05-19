@@ -14,4 +14,4 @@ pub use log::setup_log;
 pub use db_depo::{reset_db, can_connect_to_db, create_db_if_needed};
 
 const MAX_DATA_SIZE: u32 = 1000;
-const CONTINUATION_EXPIRY_SECONDS: u32 = 60 * 60 * 24;
+const CONTINUATION_EXPIRY_SECONDS: u64 = 60 * 60 * 24;

@@ -28,7 +28,7 @@ struct DbDepoImpl {
     private_key: PrivateKeyBase,
     public_key: PublicKeyBase,
     public_key_string: String,
-    continuation_expiry_seconds: u32,
+    continuation_expiry_seconds: u64,
     max_data_size: u32,
 }
 
@@ -59,7 +59,7 @@ impl DbDepoImpl {
 async fn get_settings(
     pool: &Pool,
     schema_name: &str,
-) -> Result<(PrivateKeyBase, u32, u32)> {
+) -> Result<(PrivateKeyBase, u64, u32)> {
     let mut conn = pool.get_conn().await?;
     let query = format!(
         "SELECT private_key, continuation_expiry_seconds, max_data_size FROM {}.{}",
@@ -73,7 +73,7 @@ async fn get_settings(
                 .get("private_key")
                 .ok_or_else(|| anyhow!("Private key not found"))?;
             let private_key = PrivateKeyBase::from_ur_string(private_key_string)?;
-            let continuation_expiry_seconds: u32 = row
+            let continuation_expiry_seconds: u64 = row
                 .get("continuation_expiry_seconds")
                 .ok_or_else(|| anyhow!("Continuation expiry seconds not found"))?;
             let max_data_size: u32 = row
@@ -92,7 +92,7 @@ impl DepoImpl for DbDepoImpl {
         self.max_data_size
     }
 
-    fn continuation_expiry_seconds(&self) -> u32 {
+    fn continuation_expiry_seconds(&self) -> u64 {
         self.continuation_expiry_seconds
     }
 
@@ -176,7 +176,7 @@ impl DepoImpl for DbDepoImpl {
         for row in result {
             let receipt_string: String = row.get("receipt").unwrap();
             let receipt_envelope = Envelope::from_ur_string(receipt_string).unwrap();
-            let receipt: Receipt = receipt_envelope.try_into().unwrap();
+            let receipt = Receipt::try_from(receipt_envelope).unwrap();
             receipts.insert(receipt);
         }
 

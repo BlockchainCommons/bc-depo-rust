@@ -1,11 +1,33 @@
-use std::{collections::{HashMap, HashSet}, sync::Arc};
+use std::{collections::{HashMap, HashSet}, sync::Arc, time::Duration};
 
 use anyhow::{bail, Result};
 use bc_components::{PublicKeyBase, PrivateKeyBase};
 use bc_envelope::prelude::*;
 use bytes::Bytes;
+use dcbor::Date;
 use depo_api::{
-    util::{Abbrev, FlankedFunction}, DeleteAccount, DeleteShares, FinishRecovery, GetRecovery, GetShares, GetSharesResult, Receipt, StartRecovery, StartRecoveryResult, StoreShare, StoreShareResult, UpdateKey, UpdateRecovery, DELETE_ACCOUNT_FUNCTION, DELETE_SHARES_FUNCTION, FINISH_RECOVERY_FUNCTION, GET_RECOVERY_FUNCTION, GET_SHARES_FUNCTION, START_RECOVERY_FUNCTION, STORE_SHARE_FUNCTION, UPDATE_KEY_FUNCTION, UPDATE_RECOVERY_FUNCTION
+    util::{Abbrev, FlankedFunction},
+    DeleteAccount,
+    DeleteShares,
+    FinishRecovery,
+    GetRecovery,
+    GetShares,
+    GetSharesResult,
+    Receipt,
+    StartRecovery,
+    StoreShare,
+    StoreShareResult,
+    UpdateKey,
+    UpdateRecovery,
+    DELETE_ACCOUNT_FUNCTION,
+    DELETE_SHARES_FUNCTION,
+    FINISH_RECOVERY_FUNCTION,
+    GET_RECOVERY_FUNCTION,
+    GET_SHARES_FUNCTION,
+    START_RECOVERY_FUNCTION,
+    STORE_SHARE_FUNCTION,
+    UPDATE_KEY_FUNCTION,
+    UPDATE_RECOVERY_FUNCTION,
 };
 use log::{info, error};
 
@@ -58,14 +80,15 @@ impl Depo {
     }
 
     pub async fn handle_unverified_request(&self, encrypted_request: Envelope) -> Result<Envelope> {
-        let sealed_request: SealedRequest = (encrypted_request, self.private_key()).try_into()?;
+        let sealed_request = SealedRequest::try_from((encrypted_request, self.private_key()))?;
         let id = sealed_request.id().clone();
         let function = sealed_request.function().clone();
         let sender = sealed_request.sender().clone();
         let sealed_response = match self.handle_verified_request(sealed_request).await {
-            Ok(result) => {
+            Ok((result, state)) => {
                 SealedResponse::new_success(id, self.public_key())
                     .with_result(result)
+                    .with_optional_state(state)
             },
             Err(e) => {
                 let function_name = function.named_name().unwrap_or("unknown".to_string()).flanked_function();
@@ -76,11 +99,12 @@ impl Depo {
             }
         };
 
-        let sealed_envelope = (sealed_response, self.private_key(), &sender).into();
+        let state_expiry_date = Date::now() + Duration::from_secs(self.0.continuation_expiry_seconds());
+        let sealed_envelope = (sealed_response, Some(&state_expiry_date), self.private_key(), &sender).into();
         Ok(sealed_envelope)
     }
 
-    async fn handle_verified_request(&self, sealed_request: SealedRequest) -> Result<Envelope> {
+    async fn handle_verified_request(&self, sealed_request: SealedRequest) -> Result<(Envelope, Option<Envelope>)> {
         let function = sealed_request.function();
         let id = sealed_request.id();
         let sender = sealed_request.sender();
@@ -88,49 +112,54 @@ impl Depo {
 
         info!("🔵 REQUEST {}:\n{}", id.abbrev(), body.envelope().format());
 
-        let response = if function == &STORE_SHARE_FUNCTION {
-            let expression: StoreShare = body.try_into()?;
+        let (response, state) = if function == &STORE_SHARE_FUNCTION {
+            let expression = StoreShare::try_from(body)?;
             let receipt = self.store_share(sender, expression.data()).await?;
-            StoreShareResult::new(receipt).into()
+            (StoreShareResult::new(receipt).into(), None)
         } else if function == &GET_SHARES_FUNCTION {
-            let expression: GetShares = body.try_into()?;
+            let expression = GetShares::try_from(body)?;
             let receipt_to_data = self.get_shares(sender, expression.receipts()).await?;
-            GetSharesResult::new(receipt_to_data).into()
+            (GetSharesResult::new(receipt_to_data).into(), None)
         } else if function == &DELETE_SHARES_FUNCTION {
-            let expression: DeleteShares = body.try_into()?;
+            let expression = DeleteShares::try_from(body)?;
             self.delete_shares(sender, expression.receipts()).await?;
-            Envelope::ok()
+            (Envelope::ok(), None)
         } else if function == &UPDATE_KEY_FUNCTION {
-            let expression: UpdateKey = body.try_into()?;
+            let expression = UpdateKey::try_from(body)?;
             self.update_key(sender, expression.new_key()).await?;
-            Envelope::ok()
+            (Envelope::ok(), None)
         } else if function == &DELETE_ACCOUNT_FUNCTION {
-            let _expression: DeleteAccount = body.try_into()?;
+            let _expression =DeleteAccount::try_from(body)?;
             self.delete_account(sender).await?;
-            Envelope::ok()
+            (Envelope::ok(), None)
         } else if function == &UPDATE_RECOVERY_FUNCTION {
-            let expression: UpdateRecovery = body.try_into()?;
+            let expression = UpdateRecovery::try_from(body)?;
             self.update_recovery(sender, expression.recovery().map(|x| x.as_str())).await?;
-            Envelope::ok()
+            (Envelope::ok(), None)
         } else if function == &GET_RECOVERY_FUNCTION {
-            let _expression: GetRecovery = body.try_into()?;
+            let _expression = GetRecovery::try_from(body)?;
             let recovery_method = self.get_recovery(sender).await?;
-            Envelope::new_or_null(recovery_method)
+            (Envelope::new_or_null(recovery_method), None)
         } else if function == &START_RECOVERY_FUNCTION {
-            let expression: StartRecovery = body.try_into()?;
+            let expression = StartRecovery::try_from(body)?;
             let continuation = self.start_recovery(expression.recovery(), sender).await?;
-            StartRecoveryResult::new(continuation).into()
+            (Envelope::ok(), Some(continuation))
         } else if function == &FINISH_RECOVERY_FUNCTION {
-            let expression: FinishRecovery = body.try_into()?;
-            self.finish_recovery(expression.continuation(), sender).await?;
-            Envelope::ok()
+            let _expression = FinishRecovery::try_from(body)?;
+            if let Some(state) = sealed_request.state() {
+                self.finish_recovery(state, sender).await?;
+            } else {
+                bail!("missing state");
+            }
+            // self.finish_recovery(expression.continuation(), sender).await?;
+            (Envelope::ok(), None)
         } else {
             bail!("unknown function: {}", function.name());
         };
 
         info!("✅ OK {}:\n{}", id.abbrev(), response.format());
 
-        Ok(response)
+        Ok((response, state))
     }
 }
 
@@ -326,17 +355,14 @@ impl Depo {
             dcbor::Date::now() + self.0.continuation_expiry_seconds() as f64,
         );
         let continuation_envelope = recovery_continuation
-            .to_envelope()
-            .seal(self.0.private_key(), self.public_key());
+            .to_envelope();
         Ok(continuation_envelope)
     }
 
     /// Completes a reset of the account's public key. This is called after the
     /// user has confirmed the change via their recovery contact method.
     pub async fn finish_recovery(&self, continuation_envelope: &Envelope, user_signing_key: &PublicKeyBase) -> Result<()> {
-        let continuation: RecoveryContinuation = continuation_envelope
-            .unseal(self.public_key(), self.0.private_key())?
-            .try_into()?;
+        let continuation = RecoveryContinuation::try_from(continuation_envelope.clone())?;
         // Ensure the continuation is valid
         let seconds_until_expiry = continuation.expiry().clone() - dcbor::Date::now();
         if seconds_until_expiry < 0.0 {
