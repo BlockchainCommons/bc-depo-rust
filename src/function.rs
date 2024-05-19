@@ -5,7 +5,7 @@ use bc_components::{PublicKeyBase, PrivateKeyBase};
 use bc_envelope::prelude::*;
 use bytes::Bytes;
 use depo_api::{
-    util::{Abbrev, FlankedFunction}, DeleteAccountExpression, DeleteSharesExpression, FinishRecoveryExpression, GetRecoveryExpression, GetSharesExpression, GetSharesResult, Receipt, StartRecoveryExpression, StartRecoveryResult, StoreShareExpression, StoreShareResult, UpdateKeyExpression, UpdateRecoveryExpression, DELETE_ACCOUNT_FUNCTION, DELETE_SHARES_FUNCTION, FINISH_RECOVERY_FUNCTION, GET_RECOVERY_FUNCTION, GET_SHARES_FUNCTION, START_RECOVERY_FUNCTION, STORE_SHARE_FUNCTION, UPDATE_KEY_FUNCTION, UPDATE_RECOVERY_FUNCTION
+    util::{Abbrev, FlankedFunction}, DeleteAccount, DeleteShares, FinishRecovery, GetRecovery, GetShares, GetSharesResult, Receipt, StartRecovery, StartRecoveryResult, StoreShare, StoreShareResult, UpdateKey, UpdateRecovery, DELETE_ACCOUNT_FUNCTION, DELETE_SHARES_FUNCTION, FINISH_RECOVERY_FUNCTION, GET_RECOVERY_FUNCTION, GET_SHARES_FUNCTION, START_RECOVERY_FUNCTION, STORE_SHARE_FUNCTION, UPDATE_KEY_FUNCTION, UPDATE_RECOVERY_FUNCTION
 };
 use log::{info, error};
 
@@ -69,7 +69,7 @@ impl Depo {
             },
             Err(e) => {
                 let function_name = function.named_name().unwrap_or("unknown".to_string()).flanked_function();
-                let message = format!("{}: {} {}", id, function_name, e);
+                let message = format!("{}: {} {}", id.abbrev(), function_name, e);
                 error!("{}", message);
                 SealedResponse::new_failure(id, self.public_key())
                     .with_error(message)
@@ -89,39 +89,39 @@ impl Depo {
         info!("🔵 REQUEST {}:\n{}", id.abbrev(), body.envelope().format());
 
         let response = if function == &STORE_SHARE_FUNCTION {
-            let expression: StoreShareExpression = body.try_into()?;
+            let expression: StoreShare = body.try_into()?;
             let receipt = self.store_share(sender, expression.data()).await?;
             StoreShareResult::new(receipt).into()
         } else if function == &GET_SHARES_FUNCTION {
-            let expression: GetSharesExpression = body.try_into()?;
+            let expression: GetShares = body.try_into()?;
             let receipt_to_data = self.get_shares(sender, expression.receipts()).await?;
             GetSharesResult::new(receipt_to_data).into()
         } else if function == &DELETE_SHARES_FUNCTION {
-            let expression: DeleteSharesExpression = body.try_into()?;
+            let expression: DeleteShares = body.try_into()?;
             self.delete_shares(sender, expression.receipts()).await?;
             Envelope::ok()
         } else if function == &UPDATE_KEY_FUNCTION {
-            let expression: UpdateKeyExpression = body.try_into()?;
+            let expression: UpdateKey = body.try_into()?;
             self.update_key(sender, expression.new_key()).await?;
             Envelope::ok()
         } else if function == &DELETE_ACCOUNT_FUNCTION {
-            let _expression: DeleteAccountExpression = body.try_into()?;
+            let _expression: DeleteAccount = body.try_into()?;
             self.delete_account(sender).await?;
             Envelope::ok()
         } else if function == &UPDATE_RECOVERY_FUNCTION {
-            let expression: UpdateRecoveryExpression = body.try_into()?;
+            let expression: UpdateRecovery = body.try_into()?;
             self.update_recovery(sender, expression.recovery().map(|x| x.as_str())).await?;
             Envelope::ok()
         } else if function == &GET_RECOVERY_FUNCTION {
-            let _expression: GetRecoveryExpression = body.try_into()?;
+            let _expression: GetRecovery = body.try_into()?;
             let recovery_method = self.get_recovery(sender).await?;
             Envelope::new_or_null(recovery_method)
         } else if function == &START_RECOVERY_FUNCTION {
-            let expression: StartRecoveryExpression = body.try_into()?;
+            let expression: StartRecovery = body.try_into()?;
             let continuation = self.start_recovery(expression.recovery(), sender).await?;
             StartRecoveryResult::new(continuation).into()
         } else if function == &FINISH_RECOVERY_FUNCTION {
-            let expression: FinishRecoveryExpression = body.try_into()?;
+            let expression: FinishRecovery = body.try_into()?;
             self.finish_recovery(expression.continuation(), sender).await?;
             Envelope::ok()
         } else {
