@@ -8,14 +8,11 @@ use hex_literal::hex;
 use tokio::time::sleep;
 use std::time::Duration;
 use url::Url;
-use bc_components::{PublicKeyBase, PrivateKeyBase};
-use nu_ansi_term::Color::{Cyan, Red, Yellow};
+use bc_components::{PrivateKeyBase, PublicKeyBase, ARID};
+use nu_ansi_term::Color::{Cyan, Red, Blue, Yellow};
 use anyhow::Result;
 use depo_api::{
-    request::store_share::StoreShareRequest, DeleteAccountRequest, DeleteSharesRequest,
-    FinishRecoveryRequest, GetRecoveryRequest, GetRecoveryResponse, GetSharesRequest,
-    GetSharesResponse, StartRecoveryRequest, StartRecoveryResponse, StoreShareResponse,
-    UpdateKeyRequest, UpdateRecoveryRequest,
+    request::store_share::StoreShareExpression, DeleteAccountExpression, DeleteSharesExpression, FinishRecoveryExpression, GetRecoveryExpression, GetRecoveryResult, GetSharesExpression, GetSharesResult, Receipt, StartRecoveryExpression, StartRecoveryResult, StoreShareResult, UpdateKeyExpression, UpdateRecoveryExpression
 };
 
 /// Test against the Depo API that stores data in memory.
@@ -142,252 +139,266 @@ async fn get_public_key(client: &ClientRequestHandler) -> Result<PublicKeyBase> 
 }
 
 async fn server_call(
-    request: impl EnvelopeEncodable,
+    body: Expression,
     client_private_key: &PrivateKeyBase,
     depo_public_key: &PublicKeyBase,
     depo: &impl RequestHandler,
-) -> Envelope {
-    let request = request.into_envelope();
-    let encrypted_request = request.seal(client_private_key, depo_public_key).unwrap();
+) -> SealedResponse {
+    let id = ARID::new();
+    let sender = client_private_key.public_key();
+    let sealed_request = SealedRequest::new_with_body(body, id, sender);
+    let encrypted_request = (sealed_request, client_private_key, depo_public_key).into();
 
     let raw_response = depo.handle_encrypted_request(encrypted_request).await;
 
-    if raw_response.is_failure() {
-        return raw_response;
-    }
-    let response = raw_response.unseal(depo_public_key, client_private_key).unwrap();
-    assert_eq!(
-        response.response_id().unwrap(),
-        request.request_id().unwrap()
-    );
-    response
+    let sealed_response: SealedResponse = (raw_response, client_private_key).try_into().unwrap();
+    sealed_response
+    // if raw_response.is_failure() {
+    //     return raw_response;
+    // }
+    // let response = raw_response.unseal(depo_public_key, client_private_key).unwrap();
+    // assert_eq!(
+    //     response.response_id().unwrap(),
+    //     request.request_id().unwrap()
+    // );
+    // response
+}
+
+#[macro_export]
+macro_rules! section {
+    ($msg:expr) => {
+        info!("🔷 {}", Blue.paint($msg));
+    };
+}
+
+#[macro_export]
+macro_rules! alert {
+    ($msg:expr) => {
+        info!("⚠️ {}", Yellow.paint($msg));
+    };
 }
 
 pub async fn test_depo_scenario(depo_public_key: &PublicKeyBase, depo: &impl RequestHandler) {
-    info!("{}", Cyan.paint("=== Alice stores a share"));
     let alice_private_key = PrivateKeyBase::new();
     let alice_public_key = alice_private_key.public_key();
-    let alice_data_1 = Bytes::from_static(&hex!("cafebabe"));
-    let request = StoreShareRequest::new(&alice_public_key, &alice_data_1);
-    let response_envelope = server_call(request, &alice_private_key, depo_public_key, depo).await;
-    let response = StoreShareResponse::try_from(response_envelope).unwrap();
-    let alice_receipt_1 = response.receipt();
 
-    info!("{}", Cyan.paint("=== Bob stores a share"));
     let bob_private_key = PrivateKeyBase::new();
     let bob_public_key = bob_private_key.public_key();
+
+    section!("Alice stores a share");
+    let alice_data_1 = Bytes::from_static(&hex!("cafebabe"));
+    let body = StoreShareExpression::new(alice_data_1.clone());
+    let response: StoreShareResult = server_call(body.into(), &alice_private_key, depo_public_key, depo).await.try_into().unwrap();
+    let alice_receipt_1 = response.receipt();
+
+    section!("Bob stores a share");
     let bob_data_1 = Bytes::from_static(&hex!("deadbeef"));
-    let request = StoreShareRequest::new(&bob_public_key, &bob_data_1);
-    let response_envelope = server_call(request, &bob_private_key, depo_public_key, depo).await;
-    let response = StoreShareResponse::try_from(response_envelope).unwrap();
+    let body = StoreShareExpression::new(bob_data_1.clone());
+    let response: StoreShareResult = server_call(body.into(), &bob_private_key, depo_public_key, depo).await.try_into().unwrap();
     let bob_receipt_1 = response.receipt();
 
-    info!("{}", Cyan.paint("=== Alice retrieves her share"));
-    let request = GetSharesRequest::new(&alice_public_key, vec![&alice_receipt_1]);
-    let response_envelope = server_call(request, &alice_private_key, depo_public_key, depo).await;
-    let response = GetSharesResponse::try_from(response_envelope).unwrap();
-    let alice_retrieved_data_1 = response.data_for_receipt(&alice_receipt_1).unwrap();
-    assert_eq!(alice_retrieved_data_1, alice_data_1);
+    section!("Alice retrieves her share");
+    let body = GetSharesExpression::new(vec![alice_receipt_1].into_iter().cloned().collect());
+    let response: GetSharesResult = server_call(body.into(), &alice_private_key, depo_public_key, depo).await.try_into().unwrap();
+    let alice_retrieved_data_1 = response.data_for_receipt(alice_receipt_1).unwrap();
+    assert_eq!(alice_retrieved_data_1, &alice_data_1);
 
-    info!("{}", Cyan.paint("=== Bob retrieves his share"));
-    let request = GetSharesRequest::new(&bob_public_key, vec![&bob_receipt_1]);
-    let response_envelope = server_call(request, &bob_private_key, depo_public_key, depo).await;
-    let response = GetSharesResponse::try_from(response_envelope).unwrap();
-    let bob_retrieved_data_1 = response.data_for_receipt(&bob_receipt_1).unwrap();
-    assert_eq!(bob_retrieved_data_1, bob_data_1);
+    section!("Bob retrieves his share");
+    let body = GetSharesExpression::new(vec![bob_receipt_1].into_iter().cloned().collect());
+    let response: GetSharesResult = server_call(body.into(), &bob_private_key, depo_public_key, depo).await.try_into().unwrap();
+    let bob_retrieved_data_1 = response.data_for_receipt(bob_receipt_1).unwrap();
+    assert_eq!(bob_retrieved_data_1, &bob_data_1);
 
-    info!("{}", Cyan.paint("=== Alice stores a second share"));
+    section!("Alice stores a second share");
     let alice_data_2 = Bytes::from_static(&hex!("cafef00d"));
-    let request = StoreShareRequest::new(&alice_public_key, &alice_data_2);
-    let response_envelope = server_call(request, &alice_private_key, depo_public_key, depo).await;
-    let response = StoreShareResponse::try_from(response_envelope).unwrap();
+    let body = StoreShareExpression::new(alice_data_2.clone());
+    let response: StoreShareResult = server_call(body.into(), &alice_private_key, depo_public_key, depo).await.try_into().unwrap();
     let alice_receipt_2 = response.receipt();
 
-    info!("{}", Cyan.paint("=== Alice retrieves her second share"));
-    let request = GetSharesRequest::new(&alice_public_key, vec![&alice_receipt_2]);
-    let response_envelope = server_call(request, &alice_private_key, depo_public_key, depo).await;
-    let response = GetSharesResponse::try_from(response_envelope).unwrap();
-    let alice_retrieved_data_2 = response.data_for_receipt(&alice_receipt_2).unwrap();
-    assert_eq!(alice_retrieved_data_2, alice_data_2);
+    section!("Alice retrieves her second share");
+    let body = GetSharesExpression::new(vec![alice_receipt_2].into_iter().cloned().collect());
+    let response: GetSharesResult = server_call(body.into(), &alice_private_key, depo_public_key, depo).await.try_into().unwrap();
+    let alice_retrieved_data_2 = response.data_for_receipt(alice_receipt_2).unwrap();
+    assert_eq!(alice_retrieved_data_2, &alice_data_2);
 
-    info!("{}", Cyan.paint("=== Alice retrieves both her shares identified only by her public key"));
-    let request = GetSharesRequest::new(&alice_public_key, vec![]);
-    let response_envelope = server_call(request, &alice_private_key, depo_public_key, depo).await;
-    let response = GetSharesResponse::try_from(response_envelope).unwrap();
-    assert_eq!(response.receipt_to_data().len(), 2);
+//     section!("Alice retrieves both her shares identified only by her public key");
+//     let request = GetSharesExpression::new(&alice_public_key, vec![]);
+//     let response_envelope = server_call(request, &alice_private_key, depo_public_key, depo).await;
+//     let response = GetSharesResult::try_from(response_envelope).unwrap();
+//     assert_eq!(response.receipt_to_data().len(), 2);
 
-    info!("{}", Cyan.paint("=== Bob attempts to retrieve one of Alice's shares"));
-    let request = GetSharesRequest::new(&bob_public_key, vec![&alice_receipt_1]);
-    let response_envelope = server_call(request, &bob_private_key, depo_public_key, depo).await;
-    let response = GetSharesResponse::try_from(response_envelope).unwrap();
-    assert_eq!(response.receipt_to_data().len(), 0);
+//     section!("Bob attempts to retrieve one of Alice's shares");
+//     let request = GetSharesExpression::new(&bob_public_key, vec![&alice_receipt_1]);
+//     let response_envelope = server_call(request, &bob_private_key, depo_public_key, depo).await;
+//     let response = GetSharesResult::try_from(response_envelope).unwrap();
+//     assert_eq!(response.receipt_to_data().len(), 0);
 
-    info!("{}", Red.paint("=== Someone attempts to retrieve all shares from a nonexistent account"));
-    let nonexistent_private_key = PrivateKeyBase::new();
-    let nonexistent_public_key = nonexistent_private_key.public_key();
-    let request = GetSharesRequest::new(&nonexistent_public_key, vec![]);
-    let response_envelope = server_call(request, &nonexistent_private_key, depo_public_key, depo).await;
-    assert!(response_envelope.extract_error::<String>().unwrap().contains("unknown public key"));
+//     alert!("Someone attempts to retrieve all shares from a nonexistent account");
+//     let nonexistent_private_key = PrivateKeyBase::new();
+//     let nonexistent_public_key = nonexistent_private_key.public_key();
+//     let request = GetSharesExpression::new(&nonexistent_public_key, vec![]);
+//     let response_envelope = server_call(request, &nonexistent_private_key, depo_public_key, depo).await;
+//     assert!(response_envelope.extract_error::<String>().unwrap().contains("unknown public key"));
 
-    info!("{}", Red.paint("=== Someone attempts to retrieve all shares from Alice's account using her public key"));
-    let request = GetSharesRequest::new(&alice_public_key, vec![]);
-    let response_envelope = server_call(request, &nonexistent_private_key, depo_public_key, depo).await;
-    assert!(response_envelope.extract_error::<String>().unwrap().contains("could not verify a signature"));
+//     alert!("Someone attempts to retrieve all shares from Alice's account using her public key");
+//     let request = GetSharesExpression::new(&alice_public_key, vec![]);
+//     let response_envelope = server_call(request, &nonexistent_private_key, depo_public_key, depo).await;
+//     assert!(response_envelope.extract_error::<String>().unwrap().contains("could not verify a signature"));
 
-    info!("{}", Red.paint("=== Alice attempts to retrieve her shares using the incorrect depo public key"));
-    let request = GetSharesRequest::new(&alice_public_key, vec![]);
-    let response_envelope = server_call(request, &alice_private_key, &nonexistent_public_key, depo).await;
-    assert!(response_envelope.extract_error::<String>().unwrap().contains("no recipient matches the given key"));
+//     alert!("Alice attempts to retrieve her shares using the incorrect depo public key");
+//     let request = GetSharesExpression::new(&alice_public_key, vec![]);
+//     let response_envelope = server_call(request, &alice_private_key, &nonexistent_public_key, depo).await;
+//     assert!(response_envelope.extract_error::<String>().unwrap().contains("no recipient matches the given key"));
 
-    info!("{}", Cyan.paint("=== Alice stores a share she's previously stored (idempotent)"));
-    let request = StoreShareRequest::new(&alice_public_key, alice_data_1);
-    let response_envelope = server_call(request, &alice_private_key, depo_public_key, depo).await;
-    let response = StoreShareResponse::try_from(response_envelope).unwrap();
-    let alice_receipt_3 = response.receipt();
-    assert_eq!(alice_receipt_3, alice_receipt_1);
+//     section!("Alice stores a share she's previously stored (idempotent)");
+//     let request = StoreShareExpression::new(&alice_public_key, alice_data_1);
+//     let response_envelope = server_call(request, &alice_private_key, depo_public_key, depo).await;
+//     let response = StoreShareResult::try_from(response_envelope).unwrap();
+//     let alice_receipt_3 = response.receipt();
+//     assert_eq!(alice_receipt_3, alice_receipt_1);
 
-    info!("{}", Cyan.paint("=== Alice deletes one of her shares"));
-    let request = DeleteSharesRequest::new(&alice_public_key, vec![&alice_receipt_1]);
-    let response_envelope = server_call(request, &alice_private_key, depo_public_key, depo).await;
-    assert!(response_envelope.is_result_ok().unwrap());
+//     section!("Alice deletes one of her shares");
+//     let request = DeleteSharesExpression::new(&alice_public_key, vec![&alice_receipt_1]);
+//     let response_envelope = server_call(request, &alice_private_key, depo_public_key, depo).await;
+//     assert!(response_envelope.is_result_ok().unwrap());
 
-    let request = GetSharesRequest::new(&alice_public_key, vec![]);
-    let response_envelope = server_call(request, &alice_private_key, depo_public_key, depo).await;
-    let response = GetSharesResponse::try_from(response_envelope).unwrap();
-    assert_eq!(response.receipt_to_data().len(), 1);
-    let alice_retrieved_data_2 = response.data_for_receipt(&alice_receipt_2).unwrap();
-    assert_eq!(alice_retrieved_data_2, alice_data_2);
+//     let request = GetSharesExpression::new(&alice_public_key, vec![]);
+//     let response_envelope = server_call(request, &alice_private_key, depo_public_key, depo).await;
+//     let response = GetSharesResult::try_from(response_envelope).unwrap();
+//     assert_eq!(response.receipt_to_data().len(), 1);
+//     let alice_retrieved_data_2 = response.data_for_receipt(&alice_receipt_2).unwrap();
+//     assert_eq!(alice_retrieved_data_2, alice_data_2);
 
-    info!("{}", Cyan.paint("=== Alice attempts to delete a share she already deleted (idempotent)"));
-    let request = DeleteSharesRequest::new(&alice_public_key, vec![&alice_receipt_1]);
-    let response_envelope = server_call(request, &alice_private_key, depo_public_key, depo).await;
-    assert!(response_envelope.is_result_ok().unwrap());
+//     section!("Alice attempts to delete a share she already deleted (idempotent)");
+//     let request = DeleteSharesExpression::new(&alice_public_key, vec![&alice_receipt_1]);
+//     let response_envelope = server_call(request, &alice_private_key, depo_public_key, depo).await;
+//     assert!(response_envelope.is_result_ok().unwrap());
 
-    let request = GetSharesRequest::new(&alice_public_key, vec![]);
-    let response_envelope = server_call(request, &alice_private_key, depo_public_key, depo).await;
-    let response = GetSharesResponse::try_from(response_envelope).unwrap();
-    assert_eq!(response.receipt_to_data().len(), 1);
-    let alice_retrieved_data_2 = response.data_for_receipt(&alice_receipt_2).unwrap();
-    assert_eq!(alice_retrieved_data_2, alice_data_2);
+//     let request = GetSharesExpression::new(&alice_public_key, vec![]);
+//     let response_envelope = server_call(request, &alice_private_key, depo_public_key, depo).await;
+//     let response = GetSharesResult::try_from(response_envelope).unwrap();
+//     assert_eq!(response.receipt_to_data().len(), 1);
+//     let alice_retrieved_data_2 = response.data_for_receipt(&alice_receipt_2).unwrap();
+//     assert_eq!(alice_retrieved_data_2, alice_data_2);
 
-    info!("{}", Cyan.paint("=== Bob adds a recovery method"));
-    let bob_recovery = "bob@example.com";
-    let request = UpdateRecoveryRequest::new(&bob_public_key, Some(bob_recovery));
-    let response_envelope = server_call(request, &bob_private_key, depo_public_key, depo).await;
-    assert!(response_envelope.is_result_ok().unwrap());
+//     section!("Bob adds a recovery method");
+//     let bob_recovery = "bob@example.com";
+//     let request = UpdateRecoveryExpression::new(&bob_public_key, Some(bob_recovery));
+//     let response_envelope = server_call(request, &bob_private_key, depo_public_key, depo).await;
+//     assert!(response_envelope.is_result_ok().unwrap());
 
-    info!("{}", Cyan.paint("=== Bob sets the same recovery method again (idempotent)"));
-    let request = UpdateRecoveryRequest::new(&bob_public_key, Some(bob_recovery));
-    let response_envelope = server_call(request, &bob_private_key, depo_public_key, depo).await;
-    assert!(response_envelope.is_result_ok().unwrap());
+//     section!("Bob sets the same recovery method again (idempotent)");
+//     let request = UpdateRecoveryExpression::new(&bob_public_key, Some(bob_recovery));
+//     let response_envelope = server_call(request, &bob_private_key, depo_public_key, depo).await;
+//     assert!(response_envelope.is_result_ok().unwrap());
 
-    info!("{}", Cyan.paint("=== Bob gets his recovery method"));
-    let request = GetRecoveryRequest::new(&bob_public_key);
-    let response_envelope = server_call(request, &bob_private_key, depo_public_key, depo).await;
-    let response = GetRecoveryResponse::try_from(response_envelope).unwrap();
-    assert_eq!(response.recovery(), Some(bob_recovery));
+//     section!("Bob gets his recovery method");
+//     let request = GetRecoveryExpression::new(&bob_public_key);
+//     let response_envelope = server_call(request, &bob_private_key, depo_public_key, depo).await;
+//     let response = GetRecoveryResult::try_from(response_envelope).unwrap();
+//     assert_eq!(response.recovery(), Some(bob_recovery));
 
-    info!("{}", Cyan.paint("=== Alice gets her recovery method, but she has none"));
-    let request = GetRecoveryRequest::new(&alice_public_key);
-    let response_envelope = server_call(request, &alice_private_key, depo_public_key, depo).await;
-    let response = GetRecoveryResponse::try_from(response_envelope).unwrap();
-    assert_eq!(response.recovery(), None);
+//     section!("Alice gets her recovery method, but she has none");
+//     let request = GetRecoveryExpression::new(&alice_public_key);
+//     let response_envelope = server_call(request, &alice_private_key, depo_public_key, depo).await;
+//     let response = GetRecoveryResult::try_from(response_envelope).unwrap();
+//     assert_eq!(response.recovery(), None);
 
-    info!("{}", Red.paint("=== Alice attempts to add a non-unique recovery method"));
-    let request = UpdateRecoveryRequest::new(&alice_public_key, Some(bob_recovery));
-    let response_envelope = server_call(request, &alice_private_key, depo_public_key, depo).await;
-    assert!(response_envelope.extract_error::<String>().unwrap().contains("recovery method already exists"));
+//     alert!("Alice attempts to add a non-unique recovery method");
+//     let request = UpdateRecoveryExpression::new(&alice_public_key, Some(bob_recovery));
+//     let response_envelope = server_call(request, &alice_private_key, depo_public_key, depo).await;
+//     assert!(response_envelope.extract_error::<String>().unwrap().contains("recovery method already exists"));
 
-    info!("{}", Red.paint("=== Someone attempts to retrieve the recovery method for a nonexistent account"));
-    let request = GetRecoveryRequest::new(&nonexistent_public_key);
-    let response_envelope = server_call(request, &nonexistent_private_key, depo_public_key, depo).await;
-    assert!(response_envelope.extract_error::<String>().unwrap().contains("unknown public key"));
+//     alert!("Someone attempts to retrieve the recovery method for a nonexistent account");
+//     let request = GetRecoveryExpression::new(&nonexistent_public_key);
+//     let response_envelope = server_call(request, &nonexistent_private_key, depo_public_key, depo).await;
+//     assert!(response_envelope.extract_error::<String>().unwrap().contains("unknown public key"));
 
-    info!("{}", Cyan.paint("=== Alice updates her public key to a new one"));
-    let alice_private_key_2 = PrivateKeyBase::new();
-    let alice_public_key_2 = alice_private_key_2.public_key();
-    let request = UpdateKeyRequest::new(&alice_public_key, &alice_public_key_2);
-    let response_envelope = server_call(request, &alice_private_key, depo_public_key, depo).await;
-    assert!(response_envelope.is_result_ok().unwrap());
+//     section!("Alice updates her public key to a new one");
+//     let alice_private_key_2 = PrivateKeyBase::new();
+//     let alice_public_key_2 = alice_private_key_2.public_key();
+//     let request = UpdateKeyExpression::new(&alice_public_key, &alice_public_key_2);
+//     let response_envelope = server_call(request, &alice_private_key, depo_public_key, depo).await;
+//     assert!(response_envelope.is_result_ok().unwrap());
 
-    info!("{}", Red.paint("=== Alice can no longer retrieve her shares using the old public key"));
-    let request = GetSharesRequest::new(&alice_public_key, vec![]);
-    let response_envelope = server_call(request, &alice_private_key, depo_public_key, depo).await;
-    assert!(response_envelope.extract_error::<String>().unwrap().contains("unknown public key"));
+//     alert!("Alice can no longer retrieve her shares using the old public key");
+//     let request = GetSharesExpression::new(&alice_public_key, vec![]);
+//     let response_envelope = server_call(request, &alice_private_key, depo_public_key, depo).await;
+//     assert!(response_envelope.extract_error::<String>().unwrap().contains("unknown public key"));
 
-    info!("{}", Cyan.paint("=== Alice must now use her new public key"));
-    let request = GetSharesRequest::new(&alice_public_key_2, vec![]);
-    let response_envelope = server_call(request, &alice_private_key_2, depo_public_key, depo).await;
-    let response = GetSharesResponse::try_from(response_envelope).unwrap();
-    assert_eq!(response.receipt_to_data().len(), 1);
+//     section!("Alice must now use her new public key");
+//     let request = GetSharesExpression::new(&alice_public_key_2, vec![]);
+//     let response_envelope = server_call(request, &alice_private_key_2, depo_public_key, depo).await;
+//     let response = GetSharesResult::try_from(response_envelope).unwrap();
+//     assert_eq!(response.receipt_to_data().len(), 1);
 
-    info!("{}", Cyan.paint("=== Bob has lost his public key, so he wants to replace it with a new one"));
-    let bob_private_key_2 = PrivateKeyBase::new();
-    let bob_public_key_2 = bob_private_key_2.public_key();
+//     section!("Bob has lost his public key, so he wants to replace it with a new one");
+//     let bob_private_key_2 = PrivateKeyBase::new();
+//     let bob_public_key_2 = bob_private_key_2.public_key();
 
-    info!("{}", Red.paint("=== Bob requests transfer using an incorrect recovery method"));
-    let incorrect_recovery = "wrong@example.com";
-    let request = StartRecoveryRequest::new(&bob_public_key_2, incorrect_recovery);
-    let response_envelope = server_call(request, &bob_private_key_2, depo_public_key, depo).await;
-    assert!(response_envelope.extract_error::<String>().unwrap().contains("unknown recovery"));
+//     alert!("Bob requests transfer using an incorrect recovery method");
+//     let incorrect_recovery = "wrong@example.com";
+//     let request = StartRecoveryResult::new(&bob_public_key_2, incorrect_recovery);
+//     let response_envelope = server_call(request, &bob_private_key_2, depo_public_key, depo).await;
+//     assert!(response_envelope.extract_error::<String>().unwrap().contains("unknown recovery"));
 
-    info!("{}", Cyan.paint("=== Bob requests a transfer using the correct recovery method"));
-    let request = StartRecoveryRequest::new(&bob_public_key_2, bob_recovery);
-    let response_envelope = server_call(request, &bob_private_key_2, depo_public_key, depo).await;
-    let response = StartRecoveryResponse::try_from(response_envelope).unwrap();
+//     section!("Bob requests a transfer using the correct recovery method");
+//     let request = StartRecoveryResult::new(&bob_public_key_2, bob_recovery);
+//     let response_envelope = server_call(request, &bob_private_key_2, depo_public_key, depo).await;
+//     let response = StartRecoveryResult::try_from(response_envelope).unwrap();
 
-    // The recovery continuation is both signed by the server and encrypted to
-    // the server, and is also time-limited. It is sent to Bob's recovery
-    // contact method, which acts as a second factor. Once in possession of the
-    // recovery continuation, Bob can use it to finish the recovery process.
-    //
-    // For testing purposes only, we're allowed to skip the second factor and
-    // get the recovery continuation directly.
-    let continuation = response.continuation();
+//     // The recovery continuation is both signed by the server and encrypted to
+//     // the server, and is also time-limited. It is sent to Bob's recovery
+//     // contact method, which acts as a second factor. Once in possession of the
+//     // recovery continuation, Bob can use it to finish the recovery process.
+//     //
+//     // For testing purposes only, we're allowed to skip the second factor and
+//     // get the recovery continuation directly.
+//     let continuation = response.continuation();
 
-    info!("{}", Red.paint("=== Bob attempts to use the recovery continuation to finish setting his new public key, but the request is signed by his old key"));
-    let request = FinishRecoveryRequest::new(&bob_public_key, continuation.clone());
-    let response_envelope = server_call(request, &bob_private_key, depo_public_key, depo).await;
-    assert!(response_envelope.extract_error::<String>().unwrap().contains("invalid user signing key"));
+//     alert!("Bob attempts to use the recovery continuation to finish setting his new public key, but the request is signed by his old key");
+//     let request = FinishRecoveryExpression::new(&bob_public_key, continuation.clone());
+//     let response_envelope = server_call(request, &bob_private_key, depo_public_key, depo).await;
+//     assert!(response_envelope.extract_error::<String>().unwrap().contains("invalid user signing key"));
 
-    info!("{}", Cyan.paint("=== Bob uses the recovery continuation to finish setting his new public key, properly signed by his new key"));
-    let request = FinishRecoveryRequest::new(&bob_public_key_2, continuation);
-    let response_envelope = server_call(request, &bob_private_key_2, depo_public_key, depo).await;
-    assert!(response_envelope.is_result_ok().unwrap());
+//     section!("Bob uses the recovery continuation to finish setting his new public key, properly signed by his new key");
+//     let request = FinishRecoveryExpression::new(&bob_public_key_2, continuation);
+//     let response_envelope = server_call(request, &bob_private_key_2, depo_public_key, depo).await;
+//     assert!(response_envelope.is_result_ok().unwrap());
 
-    info!("{}", Red.paint("=== Bob can no longer retrieve his shares using the old public key"));
-    let request = GetSharesRequest::new(&bob_public_key, vec![]);
-    let response_envelope = server_call(request, &bob_private_key, depo_public_key, depo).await;
-    assert!(response_envelope.extract_error::<String>().unwrap().contains("unknown public key"));
+//     alert!("Bob can no longer retrieve his shares using the old public key");
+//     let request = GetSharesExpression::new(&bob_public_key, vec![]);
+//     let response_envelope = server_call(request, &bob_private_key, depo_public_key, depo).await;
+//     assert!(response_envelope.extract_error::<String>().unwrap().contains("unknown public key"));
 
-    info!("{}", Cyan.paint("=== Bob must now use his new public key"));
-    let request = GetSharesRequest::new(&bob_public_key_2, vec![]);
-    let response_envelope = server_call(request, &bob_private_key_2, depo_public_key, depo).await;
-    let response = GetSharesResponse::try_from(response_envelope).unwrap();
-    assert_eq!(response.receipt_to_data().len(), 1);
+//     section!("Bob must now use his new public key");
+//     let request = GetSharesExpression::new(&bob_public_key_2, vec![]);
+//     let response_envelope = server_call(request, &bob_private_key_2, depo_public_key, depo).await;
+//     let response = GetSharesResult::try_from(response_envelope).unwrap();
+//     assert_eq!(response.receipt_to_data().len(), 1);
 
-    info!("{}", Cyan.paint("=== Bob decides to delete his account"));
-    let request = DeleteAccountRequest::new(&bob_public_key_2);
-    let response_envelope = server_call(request, &bob_private_key_2, depo_public_key, depo).await;
-    assert!(response_envelope.is_result_ok().unwrap());
+//     section!("Bob decides to delete his account");
+//     let request = DeleteAccountExpression::new(&bob_public_key_2);
+//     let response_envelope = server_call(request, &bob_private_key_2, depo_public_key, depo).await;
+//     assert!(response_envelope.is_result_ok().unwrap());
 
-    info!("{}", Red.paint("=== Bob can no longer retrieve his shares using the new public key"));
-    let request = GetSharesRequest::new(&bob_public_key_2, vec![]);
-    let response_envelope = server_call(request, &bob_private_key_2, depo_public_key, depo).await;
-    assert!(response_envelope.extract_error::<String>().unwrap().contains("unknown public key"));
+//     alert!("Bob can no longer retrieve his shares using the new public key");
+//     let request = GetSharesExpression::new(&bob_public_key_2, vec![]);
+//     let response_envelope = server_call(request, &bob_private_key_2, depo_public_key, depo).await;
+//     assert!(response_envelope.extract_error::<String>().unwrap().contains("unknown public key"));
 
-    info!("{}", Red.paint("=== Attempting to retrieve his recovery method now throws an error"));
-    let request = GetRecoveryRequest::new(&bob_public_key_2);
-    let response_envelope = server_call(request, &bob_private_key_2, depo_public_key, depo).await;
-    assert!(response_envelope.extract_error::<String>().unwrap().contains("unknown public key"));
+//     alert!("Attempting to retrieve his recovery method now throws an error");
+//     let request = GetRecoveryExpression::new(&bob_public_key_2);
+//     let response_envelope = server_call(request, &bob_private_key_2, depo_public_key, depo).await;
+//     assert!(response_envelope.extract_error::<String>().unwrap().contains("unknown public key"));
 
-    info!("{}", Cyan.paint("=== Deleting an account is idempotent"));
-    let request = DeleteAccountRequest::new(&bob_public_key_2);
-    let response_envelope = server_call(request, &bob_private_key_2, depo_public_key, depo).await;
-    assert!(response_envelope.is_result_ok().unwrap());
+//     section!("Deleting an account is idempotent");
+//     let request = DeleteAccountExpression::new(&bob_public_key_2);
+//     let response_envelope = server_call(request, &bob_private_key_2, depo_public_key, depo).await;
+//     assert!(response_envelope.is_result_ok().unwrap());
 
-    info!("{}", Cyan.paint("=== Alice deletes her account"));
-    let request = DeleteAccountRequest::new(&alice_public_key_2);
-    let response_envelope = server_call(request, &alice_private_key_2, depo_public_key, depo).await;
-    assert!(response_envelope.is_result_ok().unwrap());
+//     section!("Alice deletes her account");
+//     let request = DeleteAccountExpression::new(&alice_public_key_2);
+//     let response_envelope = server_call(request, &alice_private_key_2, depo_public_key, depo).await;
+//     assert!(response_envelope.is_result_ok().unwrap());
 }

@@ -10,8 +10,8 @@ pub struct RecoveryContinuation {
 }
 
 impl RecoveryContinuation {
-    const NEW_KEY_PARAM: &'static Parameter = &Parameter::new_static_named("newKey");
-    const EXPIRY_PARAM: &'static Parameter = &Parameter::new_static_named("expiry");
+    const NEW_KEY: &'static str = "newKey";
+    const EXPIRY: &'static str = "expiry";
 
     pub fn new(old_key: PublicKeyBase, new_key: PublicKeyBase, expiry: dcbor::Date) -> Self {
         Self {
@@ -37,8 +37,8 @@ impl RecoveryContinuation {
 impl From<RecoveryContinuation> for Envelope {
     fn from(request: RecoveryContinuation) -> Self {
         Envelope::new(request.old_key)
-            .add_parameter(RecoveryContinuation::NEW_KEY_PARAM, request.new_key)
-            .add_parameter(RecoveryContinuation::EXPIRY_PARAM, request.expiry)
+            .add_assertion(RecoveryContinuation::NEW_KEY, request.new_key)
+            .add_assertion(RecoveryContinuation::EXPIRY, request.expiry)
     }
 }
 
@@ -47,8 +47,8 @@ impl TryFrom<Envelope> for RecoveryContinuation {
 
     fn try_from(envelope: Envelope) -> Result<Self> {
         let old_key: PublicKeyBase = envelope.extract_subject()?;
-        let new_key: PublicKeyBase = envelope.extract_object_for_parameter(Self::NEW_KEY_PARAM)?;
-        let expiry: dcbor::Date = envelope.extract_object_for_parameter(Self::EXPIRY_PARAM)?;
+        let new_key: PublicKeyBase = envelope.extract_object_for_predicate(RecoveryContinuation::NEW_KEY)?;
+        let expiry: dcbor::Date = envelope.extract_object_for_predicate(RecoveryContinuation::EXPIRY)?;
         Ok(Self::new(old_key, new_key, expiry))
     }
 }
