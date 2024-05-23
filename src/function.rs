@@ -110,7 +110,7 @@ impl Depo {
         let sender = sealed_request.sender();
         let body = sealed_request.body().clone();
 
-        info!("🔵 REQUEST {}:\n{}", id.abbrev(), body.envelope().format());
+        info!("🔵 REQUEST {}:\n{}", id.abbrev(), body.expression_envelope().format());
 
         let (response, state) = if function == &STORE_SHARE_FUNCTION {
             let expression = StoreShare::try_from(body)?;
