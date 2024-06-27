@@ -27,7 +27,7 @@ struct MemDepoImpl {
 impl MemDepoImpl {
     fn new() -> Arc<Self> {
         let private_key = PrivateKeyBase::new();
-        let public_key = private_key.public_key();
+        let public_key = private_key.schnorr_public_key_base();
         let public_key_string = public_key.ur_string();
         Arc::new(Self {
             private_key,

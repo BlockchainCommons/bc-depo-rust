@@ -1,6 +1,6 @@
 [package]
 name = "depo"
-version = "0.5.1"
+version = "0.6.0"
 edition = "2021"
 description = "Server for secure and anonymous storage and retrieval of binary objects."
 authors = ["Blockchain Commons"]
@@ -12,11 +12,11 @@ categories = ["cryptography", "database", "web-programming::http-server"]
 documentation = "https://docs.rs/depo"
 
 [dependencies]
-dcbor = { version = "^0.14.0", features = ["multithreaded"] }
-bc-ur = "^0.4.0"
-bc-envelope = { version = "^0.17.0", features = ["multithreaded"] }
-bc-components = "^0.11.0"
-depo-api = { version = "^0.5.0", features = ["multithreaded"] }
+dcbor = { version = "^0.15.0", features = ["multithreaded"] }
+bc-ur = "^0.5.0"
+bc-envelope = { version = "^0.18.0", features = ["multithreaded"] }
+bc-components = "^0.12.0"
+depo-api = { version = "^0.6.0", features = ["multithreaded"] }
 
 warp = "^0.3.0"
 tokio = { version = "^1.0.0", features = ["full"] }

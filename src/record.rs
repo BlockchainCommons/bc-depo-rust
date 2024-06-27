@@ -1,7 +1,7 @@
 use std::fmt::Formatter;
 
 use bc_components::ARID;
-use bytes::Bytes;
+use dcbor::prelude::*;
 
 use depo_api::receipt::Receipt;
 
@@ -12,15 +12,16 @@ pub struct Record {
     // lifetime of the account.
     receipt: Receipt,
     user_id: ARID,
-    data: Bytes,
+    data: ByteString,
 }
 
 impl Record {
-    pub fn new(user_id: &ARID, data: &Bytes) -> Self {
-        Self::new_opt(Receipt::new(user_id, data), user_id.clone(), data.clone())
+    pub fn new(user_id: &ARID, data: impl Into<ByteString>) -> Self {
+        let data: ByteString = data.into();
+        Self::new_opt(Receipt::new(user_id, &data), user_id.clone(), data)
     }
 
-    pub fn new_opt(receipt: Receipt, user_id: ARID, data: Bytes) -> Self {
+    pub fn new_opt(receipt: Receipt, user_id: ARID, data: ByteString) -> Self {
         Self {
             receipt,
             user_id,
@@ -36,22 +37,22 @@ impl Record {
         &self.user_id
     }
 
-    pub fn data(&self) -> &Bytes {
+    pub fn data(&self) -> &ByteString {
         &self.data
     }
 }
 
-struct HexBytes(Bytes);
+struct HexBytes(ByteString);
 
 impl HexBytes {
-    fn new(bytes: Bytes) -> Self {
+    fn new(bytes: ByteString) -> Self {
         Self(bytes)
     }
 }
 
 impl std::fmt::Debug for HexBytes {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Bytes({})", hex::encode(&self.0))
+        write!(f, "ByteString({})", hex::encode(&self.0))
     }
 }
 

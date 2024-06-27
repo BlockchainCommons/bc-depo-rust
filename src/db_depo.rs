@@ -38,7 +38,7 @@ impl DbDepoImpl {
         let pool = db_pool(&schema_name);
         let (private_key, continuation_expiry_seconds, max_data_size) =
             get_settings(&pool, &schema_name).await?;
-        let public_key = private_key.public_key();
+        let public_key = private_key.schnorr_public_key_base();
         let public_key_string = public_key.ur_string();
         Ok(Arc::new(Self {
             schema_name,

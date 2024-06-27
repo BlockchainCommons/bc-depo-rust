@@ -3,7 +3,6 @@ use std::{collections::{HashMap, HashSet}, sync::Arc, time::Duration};
 use anyhow::{bail, Result};
 use bc_components::{PublicKeyBase, PrivateKeyBase};
 use bc_envelope::prelude::*;
-use bytes::Bytes;
 use dcbor::Date;
 use depo_api::{
     util::{Abbrev, FlankedFunction},
@@ -168,8 +167,9 @@ impl Depo {
     /// recognized, then a new account is created and the provided data is stored in
     /// it. It is also used to add additional shares to an existing account. Adding an
     /// already existing share to an account is idempotent.
-    pub async fn store_share(&self, key: &PublicKeyBase, data: &Bytes) -> Result<Receipt> {
+    pub async fn store_share(&self, key: &PublicKeyBase, data: impl Into<ByteString>) -> Result<Receipt> {
         let user = self.0.key_to_user(key).await?;
+        let data: ByteString = data.into();
         if data.len() > self.0.max_data_size() as usize {
             bail!("data too large");
         }
@@ -186,7 +186,7 @@ impl Depo {
         &self,
         key: &PublicKeyBase,
         receipts: &HashSet<Receipt>,
-    ) -> Result<HashMap<Receipt, Bytes>> {
+    ) -> Result<HashMap<Receipt, ByteString>> {
         let user = self.0.expect_key_to_user(key).await?;
         let receipts = if receipts.is_empty() {
             self.0.id_to_receipts(user.user_id()).await?
@@ -206,7 +206,7 @@ impl Depo {
 
     /// Returns a single share corresponding to the provided receipt. Attempting to
     /// retrieve a nonexistent receipt or a receipt from the wrong account is an error.
-    pub async fn get_share(&self, key: &PublicKeyBase, receipt: &Receipt) -> Result<Bytes> {
+    pub async fn get_share(&self, key: &PublicKeyBase, receipt: &Receipt) -> Result<ByteString> {
         let mut receipts = HashSet::new();
         receipts.insert(receipt.clone());
         let result = self.get_shares(key, &receipts).await?;

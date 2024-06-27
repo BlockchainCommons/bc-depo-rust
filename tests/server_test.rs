@@ -1,5 +1,4 @@
 use async_trait::async_trait;
-use bytes::Bytes;
 use bc_envelope::prelude::*;
 use depo::{Depo, start_server, setup_log, create_db_if_needed};
 use log::{warn, info};
@@ -174,7 +173,7 @@ async fn server_call(
     context: &Context<'_>,
 ) -> Result<SealedResponse> {
     let id = ARID::new();
-    let sender = client_private_key.public_key();
+    let sender = client_private_key.schnorr_public_key_base();
     let sealed_request = SealedRequest::new_with_body(body.to_expression(), id, sender)
         .with_optional_peer_continuation(peer_continuation);
     let encrypted_request = (sealed_request, client_private_key, context.depo_public_key).into();
@@ -247,9 +246,8 @@ macro_rules! alert {
     };
 }
 
-fn hex_bytes(hex: &str) -> Bytes {
-    let data = hex::decode(hex).unwrap();
-    Bytes::from(data)
+fn hex_bytes(hex: &str) -> ByteString {
+    hex::decode(hex).unwrap().into()
 }
 
 pub async fn test_depo_scenario(context: &Context<'_>) {
@@ -303,7 +301,7 @@ pub async fn test_depo_scenario(context: &Context<'_>) {
 
     alert!("Someone attempts to retrieve all shares from a nonexistent account");
     let nonexistent_private_key = PrivateKeyBase::new();
-    let nonexistent_public_key = nonexistent_private_key.public_key();
+    let nonexistent_public_key = nonexistent_private_key.schnorr_public_key_base();
     let body = GetShares::new_all_shares();
     server_call_error_contains(&body, &nonexistent_private_key, None, context, "unknown public key").await;
 
@@ -363,7 +361,7 @@ pub async fn test_depo_scenario(context: &Context<'_>) {
 
     section!("Alice updates her public key to a new one");
     let alice_2 = PrivateKeyBase::new();
-    let body = UpdateKey::new(alice_2.public_key());
+    let body = UpdateKey::new(alice_2.schnorr_public_key_base());
     server_call_ok(&body, &alice, None, context).await;
 
     alert!("Alice can no longer retrieve her shares using the old public key");
