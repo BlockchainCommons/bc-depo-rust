@@ -83,11 +83,13 @@ impl Depo {
         let id = sealed_request.id().clone();
         let function = sealed_request.function().clone();
         let sender = sealed_request.sender().clone();
+        let peer_continuation = sealed_request.peer_continuation().cloned();
         let sealed_response = match self.handle_verified_request(sealed_request).await {
             Ok((result, state)) => {
                 SealedResponse::new_success(id, self.public_key())
                     .with_result(result)
                     .with_optional_state(state)
+                    .with_peer_continuation(peer_continuation.as_ref())
             },
             Err(e) => {
                 let function_name = function.named_name().unwrap_or("unknown".to_string()).flanked_function();
@@ -95,6 +97,7 @@ impl Depo {
                 error!("{}", message);
                 SealedResponse::new_failure(id, self.public_key())
                     .with_error(message)
+                    .with_peer_continuation(peer_continuation.as_ref())
             }
         };
 
