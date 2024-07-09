@@ -51,25 +51,26 @@ impl Depo {
     pub fn public_key_string(&self) -> &str {
         self.0.public_key_string()
     }
+}
 
-    pub async fn handle_request_string(&self, request: String) -> String {
-        let request_envelope = match Envelope::from_ur_string(&request) {
-            Ok(request) => request,
+impl Depo {
+    pub async fn handle_request_string(&self, ur_string: String) -> String {
+        match Envelope::from_ur_string(&ur_string) {
+            Ok(request_envelope) => self.handle_request(request_envelope).await.ur_string(),
             Err(_) => {
                 error!("unknown: invalid request");
-                let sealed_response = SealedResponse::new_early_failure(self.public_key()).with_error("invalid request");
-                let envelope: Envelope = (sealed_response, self.private_key()).into();
-                return envelope.ur_string()
+                let sealed_response = SealedResponse::new_early_failure(self.public_key())
+                    .with_error("invalid request");
+                Envelope::from((sealed_response, self.private_key())).ur_string()
             }
-        };
-        self.handle_request(request_envelope).await.ur_string()
+        }
     }
 
     pub async fn handle_request(&self, encrypted_request: Envelope) -> Envelope {
         match self.handle_unverified_request(encrypted_request).await {
             Ok(success_response) => success_response,
-            Err(e) => {
-                let message = e.to_string();
+            Err(error) => {
+                let message = error.to_string();
                 error!("unknown: {}", message);
                 SealedResponse::new_early_failure(self.public_key())
                     .with_error(message)
@@ -91,9 +92,9 @@ impl Depo {
                     .with_optional_state(state)
                     .with_peer_continuation(peer_continuation.as_ref())
             },
-            Err(e) => {
+            Err(error) => {
                 let function_name = function.named_name().unwrap_or("unknown".to_string()).flanked_function();
-                let message = format!("{}: {} {}", id.abbrev(), function_name, e);
+                let message = format!("{}: {} {}", id.abbrev(), function_name, error);
                 error!("{}", message);
                 SealedResponse::new_failure(id, self.public_key())
                     .with_error(message)
@@ -102,7 +103,7 @@ impl Depo {
         };
 
         let state_expiry_date = Date::now() + Duration::from_secs(self.0.continuation_expiry_seconds());
-        let sealed_envelope = (sealed_response, Some(&state_expiry_date), self.private_key(), &sender).into();
+        let sealed_envelope = Envelope::from((sealed_response, Some(&state_expiry_date), self.private_key(), &sender));
         Ok(sealed_envelope)
     }
 
