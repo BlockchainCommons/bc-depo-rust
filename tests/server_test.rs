@@ -42,6 +42,7 @@ impl Context<'_> {
 /// Test against the Depo API that stores data in memory.
 #[tokio::test]
 async fn test_in_memory_depo() {
+    bc_envelope::register_tags();
     setup_log();
     let depo = Depo::new_in_memory();
     let context = Context::new(depo.public_key(), &depo);
@@ -52,6 +53,7 @@ async fn test_in_memory_depo() {
 /// Requires a MySQL or MariaDB server running on localhost.
 #[tokio::test]
 async fn test_db_depo() {
+    bc_envelope::register_tags();
     setup_log();
     let schema_name = "test_db_depo";
     if let Err(e) = create_db_if_needed(schema_name).await {
@@ -69,6 +71,7 @@ async fn test_db_depo() {
 /// Requires a MySQL or MariaDB server running on localhost.
 #[tokio::test]
 async fn test_server_depo() {
+    bc_envelope::register_tags();
     setup_log();
     let schema_name = "test_server_depo";
     let port: u16 = 5333;
@@ -96,6 +99,7 @@ async fn test_server_depo() {
 /// Test against the full Depo HTTP server running in separate process.
 #[tokio::test]
 async fn test_server_separate() {
+    bc_envelope::register_tags();
     setup_log();
 
     let port: u16 = 5332;
