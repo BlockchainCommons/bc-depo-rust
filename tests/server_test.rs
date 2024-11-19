@@ -1,6 +1,7 @@
 use async_trait::async_trait;
 use bc_envelope::prelude::*;
 use depo::{Depo, start_server, setup_log, create_db_if_needed};
+use gstp::{SealedRequest, SealedRequestBehavior, SealedResponse, SealedResponseBehavior};
 use log::{warn, info};
 use reqwest::{self, Client, StatusCode};
 use tokio::time::sleep;
@@ -180,11 +181,11 @@ async fn server_call(
     let sender = client_private_key.schnorr_public_key_base();
     let sealed_request = SealedRequest::new_with_body(body.to_expression(), id, sender)
         .with_optional_peer_continuation(peer_continuation);
-    let encrypted_request = (sealed_request, client_private_key, context.depo_public_key).into();
+    let encrypted_request = sealed_request.to_envelope(None, Some(client_private_key), Some(context.depo_public_key));
 
     let raw_response = context.depo.handle_encrypted_request(encrypted_request).await;
 
-    SealedResponse::try_from((raw_response, client_private_key))
+    SealedResponse::try_from_encrypted_envelope(&raw_response, None, None, client_private_key)
 }
 
 async fn server_call_ok(

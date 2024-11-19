@@ -28,6 +28,7 @@ use depo_api::{
     UPDATE_KEY_FUNCTION,
     UPDATE_RECOVERY_FUNCTION,
 };
+use gstp::{SealedRequest, SealedRequestBehavior, SealedResponse, SealedResponseBehavior};
 use log::{info, error};
 
 use crate::{depo_impl::DepoImpl, record::Record, recovery_continuation::RecoveryContinuation};
@@ -61,7 +62,7 @@ impl Depo {
                 error!("unknown: invalid request");
                 let sealed_response = SealedResponse::new_early_failure(self.public_key())
                     .with_error("invalid request");
-                Envelope::from((sealed_response, self.private_key())).ur_string()
+                sealed_response.to_envelope(None, Some(self.private_key()), None).ur_string()
             }
         }
     }
@@ -74,13 +75,13 @@ impl Depo {
                 error!("unknown: {}", message);
                 SealedResponse::new_early_failure(self.public_key())
                     .with_error(message)
-                    .into()
+                    .to_envelope(None, None, None)
             },
         }
     }
 
     pub async fn handle_unverified_request(&self, encrypted_request: Envelope) -> Result<Envelope> {
-        let sealed_request = SealedRequest::try_from((encrypted_request, self.private_key()))?;
+        let sealed_request = SealedRequest::try_from_envelope(&encrypted_request, None, None, self.private_key())?;
         let id = sealed_request.id().clone();
         let function = sealed_request.function().clone();
         let sender = sealed_request.sender().clone();
@@ -103,7 +104,7 @@ impl Depo {
         };
 
         let state_expiry_date = Date::now() + Duration::from_secs(self.0.continuation_expiry_seconds());
-        let sealed_envelope = Envelope::from((sealed_response, Some(&state_expiry_date), self.private_key(), &sender));
+        let sealed_envelope = sealed_response.to_envelope(Some(&state_expiry_date), Some(self.private_key()), Some(&sender));
         Ok(sealed_envelope)
     }
 
