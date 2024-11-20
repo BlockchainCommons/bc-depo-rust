@@ -28,7 +28,7 @@ use depo_api::{
     UPDATE_KEY_FUNCTION,
     UPDATE_RECOVERY_FUNCTION,
 };
-use gstp::{SealedRequest, SealedRequestBehavior, SealedResponse, SealedResponseBehavior};
+use gstp::prelude::*;
 use log::{info, error};
 
 use crate::{depo_impl::DepoImpl, record::Record, recovery_continuation::RecoveryContinuation};

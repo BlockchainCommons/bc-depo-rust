@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use bc_envelope::prelude::*;
 use depo::{Depo, start_server, setup_log, create_db_if_needed};
-use gstp::{SealedRequest, SealedRequestBehavior, SealedResponse, SealedResponseBehavior};
+use gstp::prelude::*;
 use log::{warn, info};
 use reqwest::{self, Client, StatusCode};
 use tokio::time::sleep;
