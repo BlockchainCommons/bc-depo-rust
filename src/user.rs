@@ -1,35 +1,34 @@
-use bc_components::{PublicKeyBase, ARID};
+use bc_components::XID;
+use bc_xid::XIDDocument;
 
 #[derive(Debug, Clone)]
 pub struct User {
-    user_id: ARID,
-    public_key: PublicKeyBase,
+    xid_document: XIDDocument,
     recovery: Option<String>,
 }
 
 impl User {
-    pub fn new(user_id: ARID, public_key: PublicKeyBase) -> Self {
-        Self::new_opt(user_id, public_key, None)
+    pub fn new(xid_document: impl AsRef<XIDDocument>) -> Self {
+        Self::new_opt(xid_document.as_ref(), None)
     }
 
-    pub fn new_opt(user_id: ARID, public_key: PublicKeyBase, recovery: Option<String>) -> Self {
+    pub fn new_opt(xid_document: impl AsRef<XIDDocument>, recovery: Option<String>) -> Self {
         Self {
-            user_id,
-            public_key,
+            xid_document: xid_document.as_ref().clone(),
             recovery,
         }
     }
 
-    pub fn user_id(&self) -> &ARID {
-        &self.user_id
+    pub fn user_id(&self) -> &XID {
+        self.xid_document.xid()
     }
 
-    pub fn public_key(&self) -> &PublicKeyBase {
-        &self.public_key
+    pub fn xid_document(&self) -> &XIDDocument {
+        &self.xid_document
     }
 
-    pub fn set_public_key(&mut self, public_key: PublicKeyBase) {
-        self.public_key = public_key;
+    pub fn set_xid_document(&mut self, xid_document: impl AsRef<XIDDocument>) {
+        self.xid_document = xid_document.as_ref().clone();
     }
 
     pub fn recovery(&self) -> Option<&str> {

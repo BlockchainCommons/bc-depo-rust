@@ -1,6 +1,6 @@
 use std::fmt::Formatter;
 
-use bc_components::ARID;
+use bc_components::XID;
 use dcbor::prelude::*;
 
 use depo_api::receipt::Receipt;
@@ -11,17 +11,17 @@ pub struct Record {
     // Users always identify themselves by a public key, which can change over the
     // lifetime of the account.
     receipt: Receipt,
-    user_id: ARID,
+    user_id: XID,
     data: ByteString,
 }
 
 impl Record {
-    pub fn new(user_id: &ARID, data: impl Into<ByteString>) -> Self {
+    pub fn new(user_id: &XID, data: impl Into<ByteString>) -> Self {
         let data: ByteString = data.into();
         Self::new_opt(Receipt::new(user_id, &data), user_id.clone(), data)
     }
 
-    pub fn new_opt(receipt: Receipt, user_id: ARID, data: ByteString) -> Self {
+    pub fn new_opt(receipt: Receipt, user_id: XID, data: ByteString) -> Self {
         Self {
             receipt,
             user_id,
@@ -33,7 +33,7 @@ impl Record {
         &self.receipt
     }
 
-    pub fn user_id(&self) -> &ARID {
+    pub fn user_id(&self) -> &XID {
         &self.user_id
     }
 

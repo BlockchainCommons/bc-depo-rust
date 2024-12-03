@@ -38,7 +38,7 @@ pub async fn start_server(schema_name: &str, port: u16) -> Result<()> {
     let socket_addr = addr.parse::<std::net::SocketAddr>()?;
 
     info!("{}", Green.paint(format!("Starting Blockchain Commons Depository on {}:{}", host, port)));
-    info!("{}", Green.paint(format!("Public key: {}", depo.public_key_string())));
+    info!("{}", Green.paint(format!("Server XIDDocument: {}", depo.public_xid_document_string())));
 
     warp::serve(routes)
         .run(socket_addr)
@@ -52,7 +52,7 @@ fn with_depo(depo: Depo) -> impl Filter<Extract = (Depo,), Error = std::convert:
 }
 
 async fn key_handler(depo: Depo) -> Result<Box<dyn Reply>, Rejection> {
-    Ok(Box::new(reply::with_status(depo.public_key_string().to_string(), StatusCode::OK)))
+    Ok(Box::new(reply::with_status(depo.public_xid_document_string().to_string(), StatusCode::OK)))
 }
 
 async fn operation_handler(depo: Depo, body: bytes::Bytes) -> Result<Box<dyn Reply>, Rejection> {

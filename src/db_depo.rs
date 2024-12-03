@@ -2,8 +2,9 @@ use std::{collections::HashSet, sync::Arc};
 
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
-use bc_components::{PrivateKeyBase, PublicKeyBase, ARID};
+use bc_components::{PrivateKeyBase, XID};
 use bc_envelope::prelude::*;
+use bc_xid::XIDDocument;
 use depo_api::receipt::Receipt;
 use mysql_async::{prelude::*, Pool, Row};
 use url::Url;
@@ -26,8 +27,8 @@ struct DbDepoImpl {
     schema_name: String,
     pool: Pool,
     private_key: PrivateKeyBase,
-    public_key: PublicKeyBase,
-    public_key_string: String,
+    public_xid_document: XIDDocument,
+    public_xid_document_string: String,
     continuation_expiry_seconds: u64,
     max_data_size: u32,
 }
@@ -38,14 +39,14 @@ impl DbDepoImpl {
         let pool = db_pool(&schema_name);
         let (private_key, continuation_expiry_seconds, max_data_size) =
             get_settings(&pool, &schema_name).await?;
-        let public_key = private_key.schnorr_public_key_base();
-        let public_key_string = public_key.ur_string();
+        let public_xid_document = XIDDocument::from(private_key.schnorr_public_key_base());
+        let public_xid_document_string = public_xid_document.ur_string();
         Ok(Arc::new(Self {
             schema_name,
             pool,
             private_key,
-            public_key,
-            public_key_string,
+            public_xid_document,
+            public_xid_document_string,
             continuation_expiry_seconds,
             max_data_size,
         }))
@@ -61,10 +62,10 @@ async fn get_settings(
     schema_name: &str,
 ) -> Result<(PrivateKeyBase, u64, u32)> {
     let mut conn = pool.get_conn().await?;
-    let query = format!(
-        "SELECT private_key, continuation_expiry_seconds, max_data_size FROM {}.{}",
-        schema_name, SETTINGS_TABLE_NAME
-    );
+    let query = format!(r"
+        SELECT private_key, continuation_expiry_seconds, max_data_size
+        FROM {schema_name}.{SETTINGS_TABLE_NAME}
+    ");
 
     let result: Option<Row> = conn.query_first(query).await?;
     match result {
@@ -100,25 +101,19 @@ impl DepoImpl for DbDepoImpl {
         &self.private_key
     }
 
-    fn public_key(&self) -> &PublicKeyBase {
-        &self.public_key
+    fn public_xid_document(&self) -> &XIDDocument {
+        &self.public_xid_document
     }
 
-    fn public_key_string(&self) -> &str {
-        &self.public_key_string
+    fn public_xid_document_string(&self) -> &str {
+        &self.public_xid_document_string
     }
 
-    async fn existing_key_to_id(&self, public_key: &PublicKeyBase) -> Result<Option<ARID>> {
-        let user = key_to_user(&self.pool, public_key).await?;
-        let id = user.map(|user| user.user_id().clone());
-        Ok(id)
-    }
-
-    async fn existing_id_to_user(&self, user_id: &ARID) -> Result<Option<User>> {
+    async fn user_id_to_existing_user(&self, user_id: &XID) -> Result<Option<User>> {
         let mut conn = self.pool.get_conn().await?;
-        let query = "SELECT user_id, public_key, recovery FROM users WHERE user_id = :user_id";
+        let query = "SELECT user_id, xid_document, recovery FROM users WHERE user_id = :user_id";
         let params = params! {
-            "user_id" => user_id.as_ref().ur_string()
+            "user_id" => user_id.ur_string()
         };
 
         let result: Option<Row> = conn.exec_first(query, params).await?;
@@ -131,10 +126,15 @@ impl DepoImpl for DbDepoImpl {
 
     async fn insert_user(&self, user: &User) -> Result<()> {
         let mut conn = self.pool.get_conn().await?;
-        let query = format!("INSERT INTO {}.{} (user_id, public_key, recovery) VALUES (:user_id, :public_key, :recovery)", self.schema_name(), USERS_TABLE_NAME);
+        let schema_name = self.schema_name();
+        let query = format!(r"
+            INSERT INTO {schema_name}.{USERS_TABLE_NAME}
+            (user_id, xid_document, recovery)
+            VALUES (:user_id, :xid_document, :recovery)
+        ");
         let params = params! {
             "user_id" => user.user_id().ur_string(),
-            "public_key" => user.public_key().ur_string(),
+            "xid_document" => user.xid_document().ur_string(),
             "recovery" => user.recovery(),
         };
 
@@ -145,14 +145,12 @@ impl DepoImpl for DbDepoImpl {
 
     async fn insert_record(&self, record: &Record) -> Result<()> {
         let mut conn = self.pool.get_conn().await?;
-        let query = format!(
-            r#"
-            INSERT IGNORE INTO {}.{} (receipt, user_id, data)
+        let schema_name = self.schema_name();
+        let query = format!(r"
+            INSERT IGNORE INTO {schema_name}.{RECORDS_TABLE_NAME}
+            (receipt, user_id, data)
             VALUES (:receipt, :user_id, :data)
-        "#,
-            self.schema_name(),
-            RECORDS_TABLE_NAME
-        );
+        ");
         let params = params! {
             "receipt" => record.receipt().to_envelope().ur_string(),
             "user_id" => record.user_id().ur_string(),
@@ -164,11 +162,16 @@ impl DepoImpl for DbDepoImpl {
         Ok(())
     }
 
-    async fn id_to_receipts(&self, user_id: &ARID) -> Result<HashSet<Receipt>> {
+    async fn id_to_receipts(&self, user_id: &XID) -> Result<HashSet<Receipt>> {
         let mut conn = self.pool.get_conn().await?;
-        let query = "SELECT receipt FROM records WHERE user_id = :user_id";
+        let schema_name = self.schema_name();
+        let query = format!(r"
+            SELECT receipt
+            FROM {schema_name}.{RECORDS_TABLE_NAME}
+            WHERE user_id = :user_id
+        ");
         let params = params! {
-            "user_id" => user_id.as_ref().ur_string()
+            "user_id" => user_id.ur_string()
         };
 
         let mut receipts = HashSet::new();
@@ -185,7 +188,12 @@ impl DepoImpl for DbDepoImpl {
 
     async fn receipt_to_record(&self, receipt: &Receipt) -> Result<Option<Record>> {
         let mut conn = self.pool.get_conn().await?;
-        let query = "SELECT user_id, data FROM records WHERE receipt = :receipt";
+        let schema_name = self.schema_name();
+        let query = format!(r"
+            SELECT user_id, data
+            FROM {schema_name}.{RECORDS_TABLE_NAME}
+            WHERE receipt = :receipt
+        ");
         let params = params! {
             "receipt" => receipt.to_envelope().ur_string()
         };
@@ -193,7 +201,7 @@ impl DepoImpl for DbDepoImpl {
         let result: Option<Row> = conn.exec_first(query, params).await?;
         if let Some(row) = result {
             let user_id_string: String = row.get("user_id").unwrap();
-            let user_id = ARID::from_ur_string(user_id_string).unwrap();
+            let user_id = XID::from_ur_string(user_id_string).unwrap();
             let data: Vec<u8> = row.get("data").unwrap();
             let record = Record::new_opt(receipt.clone(), user_id, data.into());
 
@@ -215,17 +223,17 @@ impl DepoImpl for DbDepoImpl {
         Ok(())
     }
 
-    async fn set_user_key(
+    async fn set_user_xid_document(
         &self,
-        old_public_key: &PublicKeyBase,
-        new_public_key: &PublicKeyBase,
+        user_id: &XID,
+        new_xid_document: &XIDDocument,
     ) -> Result<()> {
         let mut conn = self.pool.get_conn().await?;
         let query =
-            "UPDATE users SET public_key = :new_public_key WHERE public_key = :old_public_key";
+            "UPDATE users SET xid_document = :new_xid_document WHERE user_id = :user_id";
         let params = params! {
-            "new_public_key" => new_public_key.ur_string(),
-            "old_public_key" => old_public_key.ur_string(),
+            "user_id" => user_id.ur_string(),
+            "new_xid_document" => new_xid_document.ur_string(),
         };
 
         conn.exec_drop(query, params).await?;
@@ -238,7 +246,7 @@ impl DepoImpl for DbDepoImpl {
         let query = "UPDATE users SET recovery = :recovery WHERE user_id = :user_id";
         let params = params! {
             "recovery" => recovery,
-            "user_id" => user.user_id().as_ref().ur_string(),
+            "user_id" => user.user_id().ur_string(),
         };
 
         conn.exec_drop(query, params).await?;
@@ -250,7 +258,7 @@ impl DepoImpl for DbDepoImpl {
         let mut conn = self.pool.get_conn().await?;
         let query = "DELETE FROM users WHERE user_id = :user_id";
         let params = params! {
-            "user_id" => user.user_id().as_ref().ur_string(),
+            "user_id" => user.user_id().ur_string(),
         };
 
         conn.exec_drop(query, params).await?;
@@ -276,35 +284,17 @@ impl DepoImpl for DbDepoImpl {
 
 fn row_to_user(row: Row) -> User {
     let user_id_string: String = row.get("user_id").unwrap();
-    let user_id = ARID::from_ur_string(user_id_string).unwrap();
-    let public_key_string: String = row.get("public_key").unwrap();
-    let public_key = PublicKeyBase::from_ur_string(public_key_string).unwrap();
+    let _user_id = XID::from_ur_string(user_id_string).unwrap();
+    let xid_document_string: String = row.get("xid_document").unwrap();
+    let xid_document = XIDDocument::from_ur_string(xid_document_string).unwrap();
     let recovery: Option<String> = row.get_opt("recovery").unwrap().ok();
 
-    User::new_opt(user_id, public_key, recovery)
+    User::new_opt(xid_document, recovery)
 }
 
 impl Depo {
     pub async fn new_db(schema_name: impl AsRef<str>) -> Result<Self> {
         Ok(Self::new(DbDepoImpl::new(schema_name).await?))
-    }
-}
-
-pub async fn key_to_user(
-    pool: &Pool,
-    key: impl AsRef<PublicKeyBase>,
-) -> Result<Option<User>> {
-    let mut conn = pool.get_conn().await?;
-    let query = "SELECT user_id, public_key, recovery FROM users WHERE public_key = :key";
-    let params = params! {
-        "key" => key.as_ref().ur_string()
-    };
-
-    let result: Option<Row> = conn.exec_first(query, params).await?;
-    if let Some(row) = result {
-        Ok(Some(row_to_user(row)))
-    } else {
-        Ok(None)
     }
 }
 
@@ -332,57 +322,58 @@ pub fn db_pool(schema_name: &str) -> Pool {
 }
 
 pub async fn drop_db(server_pool: &Pool, schema_name: &str) -> Result<()> {
-    let query = format!("DROP DATABASE IF EXISTS {}", schema_name);
+    let query = format!(r"
+        DROP DATABASE IF EXISTS {schema_name}
+    ");
     server_pool.get_conn().await?.query_drop(query).await?;
 
     Ok(())
 }
 
 pub async fn create_db(server_pool: &Pool, schema_name: &str) -> Result<()> {
-    let query = format!("CREATE DATABASE IF NOT EXISTS {}", schema_name);
+    let query = format!(r"
+        CREATE DATABASE IF NOT EXISTS {schema_name}
+    ");
     server_pool.get_conn().await?.query_drop(query).await?;
 
-    let query = format!(
-        r"CREATE TABLE IF NOT EXISTS {}.{} (
+    let query = format!(r"
+        CREATE TABLE IF NOT EXISTS {schema_name}.{USERS_TABLE_NAME} (
             user_id VARCHAR(100) NOT NULL,
-            public_key VARCHAR(200) UNIQUE NOT NULL,
+            xid_document VARCHAR(1000) UNIQUE NOT NULL,
             recovery VARCHAR(1000),
             PRIMARY KEY (user_id),
             INDEX (public_key),
             INDEX (recovery)
-        )",
-        schema_name, USERS_TABLE_NAME
-    );
+        )
+    ");
     server_pool.get_conn().await?.query_drop(query).await?;
 
-    let query = format!(
-        r"CREATE TABLE IF NOT EXISTS {}.{} (
+    let query = format!(r"
+        CREATE TABLE IF NOT EXISTS {schema_name}.{RECORDS_TABLE_NAME} (
             receipt VARCHAR(150) NOT NULL,
             user_id VARCHAR(100) NOT NULL,
             data BLOB NOT NULL,
             PRIMARY KEY (receipt),
             INDEX (user_id),
-            FOREIGN KEY (user_id) REFERENCES {}.{}(user_id) ON DELETE CASCADE
-        )",
-        schema_name, RECORDS_TABLE_NAME, schema_name, USERS_TABLE_NAME
-    );
+            FOREIGN KEY (user_id) REFERENCES {schema_name}.{USERS_TABLE_NAME}(user_id) ON DELETE CASCADE
+        )
+    ");
 
     server_pool.get_conn().await?.query_drop(query).await?;
-    let query = format!(
-        r"CREATE TABLE IF NOT EXISTS {}.{} (
+    let query = format!(r"
+        CREATE TABLE IF NOT EXISTS {schema_name}.{SETTINGS_TABLE_NAME} (
             private_key VARCHAR(120),
             continuation_expiry_seconds INT UNSIGNED,
             max_data_size INT UNSIGNED
-        )",
-        schema_name, SETTINGS_TABLE_NAME
-    );
+        )
+    ");
     server_pool.get_conn().await?.query_drop(query).await?;
 
     // Check if settings already exist
-    let check_query = format!(
-        "SELECT COUNT(*) FROM {}.{}",
-        schema_name, SETTINGS_TABLE_NAME
-    );
+    let check_query = format!(r"
+        SELECT COUNT(*)
+        FROM {schema_name}.{SETTINGS_TABLE_NAME}
+    ");
     let count: u64 = server_pool
         .get_conn().await?
         .query_first(check_query).await?
@@ -392,15 +383,11 @@ pub async fn create_db(server_pool: &Pool, schema_name: &str) -> Result<()> {
     if count == 0 {
         let private_key = PrivateKeyBase::new().ur_string();
 
-        let query = format!(
-            r"INSERT INTO {}.{}
-            (private_key, continuation_expiry_seconds, max_data_size) VALUES ('{}', {}, {})",
-            schema_name,
-            SETTINGS_TABLE_NAME,
-            private_key,
-            CONTINUATION_EXPIRY_SECONDS,
-            MAX_DATA_SIZE
-        );
+        let query = format!(r"
+            INSERT INTO {schema_name}.{SETTINGS_TABLE_NAME}
+            (private_key, continuation_expiry_seconds, max_data_size)
+            VALUES ('{private_key}', {CONTINUATION_EXPIRY_SECONDS}, {MAX_DATA_SIZE})
+        ");
         server_pool.get_conn().await?.query_drop(query).await?;
     }
 

@@ -4,20 +4,21 @@ version = "0.6.2"
 edition = "2021"
 description = "Server for secure and anonymous storage and retrieval of binary objects."
 authors = ["Blockchain Commons"]
-keywords = ["cryptocurrency", "security", "key-management", "recovery", "server"]
 repository = "https://github.com/BlockchainCommons/bc-depo-rust"
 readme = "README.md"
 license = "BSD-2-Clause-Patent"
-categories = ["cryptography", "database", "web-programming::http-server"]
 documentation = "https://docs.rs/depo"
+keywords = ["cryptocurrency", "security", "key-management", "recovery", "server"] # Up to five
+categories = ["cryptography", "database", "web-programming::http-server"] # https://crates.io/category_slugs
 
 [dependencies]
-dcbor = { version = "^0.15.0", features = ["multithreaded"] }
-bc-ur = "^0.5.0"
-bc-components = "^0.13.0"
-bc-envelope = { version = "^0.18.0", features = ["multithreaded"] }
+dcbor = { version = "^0.16.0", features = ["multithreaded"] }
+bc-ur = "^0.6.0"
+bc-components = "^0.14.0"
+bc-envelope = { version = "^0.19.0", features = ["multithreaded"] }
 gstp = "^0.1.0"
-depo-api = { version = "^0.6.0", features = ["multithreaded"] }
+depo-api = { version = "^0.7.0", features = ["multithreaded"] }
+bc-xid = "^0.1.1"
 
 warp = "^0.3.0"
 tokio = { version = "^1.0.0", features = ["full"] }
