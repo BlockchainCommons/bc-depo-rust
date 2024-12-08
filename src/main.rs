@@ -4,6 +4,8 @@ use nu_ansi_term::Color::Red;
 
 #[tokio::main]
 async fn main() {
+    bc_envelope::register_tags();
+
     setup_log();
 
     let schema_name = "depo";

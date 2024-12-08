@@ -268,7 +268,7 @@ impl DepoImpl for DbDepoImpl {
 
     async fn recovery_to_user(&self, recovery: &str) -> Result<Option<User>> {
         let mut conn = self.pool.get_conn().await?;
-        let query = "SELECT user_id, public_key, recovery FROM users WHERE recovery = :recovery";
+        let query = "SELECT user_id, xid_document, recovery FROM users WHERE recovery = :recovery";
         let params = params! {
             "recovery" => recovery
         };
@@ -342,7 +342,7 @@ pub async fn create_db(server_pool: &Pool, schema_name: &str) -> Result<()> {
             xid_document VARCHAR(1000) UNIQUE NOT NULL,
             recovery VARCHAR(1000),
             PRIMARY KEY (user_id),
-            INDEX (public_key),
+            INDEX (xid_document),
             INDEX (recovery)
         )
     ");

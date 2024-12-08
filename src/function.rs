@@ -1,7 +1,6 @@
 use std::{collections::{HashMap, HashSet}, sync::Arc, time::Duration};
 
 use anyhow::{bail, Result};
-use bc_components::XID;
 use bc_envelope::{prelude::*, PrivateKeyBase};
 use bc_xid::XIDDocument;
 use dcbor::Date;
@@ -110,42 +109,50 @@ impl Depo {
         Ok(sealed_envelope)
     }
 
+    async fn validate_sender_key(&self, sender: &XIDDocument) -> Result<()> {
+        let user_id = sender.xid();
+        let user = self.0.expect_user_id_to_user(user_id).await?;
+        if user.xid_document().verification_key() != sender.verification_key() {
+            bail!("invalid sender verification key for {user_id}");
+        }
+        Ok(())
+    }
+
     async fn handle_verified_request(&self, sealed_request: SealedRequest) -> Result<(Envelope, Option<Envelope>)> {
         let function = sealed_request.function();
         let id = sealed_request.id();
         let sender = sealed_request.sender();
-        let user_id = sender.xid();
         let body = sealed_request.body().clone();
 
         info!("🔵 REQUEST {}:\n{}", id.abbrev(), body.expression_envelope().format());
 
         let (response, state) = if function == &STORE_SHARE_FUNCTION {
             let expression = StoreShare::try_from(body)?;
-            let receipt = self.store_share(user_id, expression.data()).await?;
+            let receipt = self.store_share(sender, expression.data()).await?;
             (StoreShareResult::new(receipt).into(), None)
         } else if function == &GET_SHARES_FUNCTION {
             let expression = GetShares::try_from(body)?;
-            let receipt_to_data = self.get_shares(user_id, expression.receipts()).await?;
+            let receipt_to_data = self.get_shares(sender, expression.receipts()).await?;
             (GetSharesResult::new(receipt_to_data).into(), None)
         } else if function == &DELETE_SHARES_FUNCTION {
             let expression = DeleteShares::try_from(body)?;
-            self.delete_shares(user_id, expression.receipts()).await?;
+            self.delete_shares(sender, expression.receipts()).await?;
             (Envelope::ok(), None)
         } else if function == &UPDATE_XID_DOCUMENT_FUNCTION {
             let expression = UpdateXIDDocument::try_from(body)?;
-            self.update_xid_document(user_id, expression.new_xid_document()).await?;
+            self.update_xid_document(sender, expression.new_xid_document()).await?;
             (Envelope::ok(), None)
         } else if function == &DELETE_ACCOUNT_FUNCTION {
             let _expression =DeleteAccount::try_from(body)?;
-            self.delete_account(user_id).await?;
+            self.delete_account(sender).await?;
             (Envelope::ok(), None)
         } else if function == &UPDATE_RECOVERY_FUNCTION {
             let expression = UpdateRecovery::try_from(body)?;
-            self.update_recovery(user_id, expression.recovery().map(|x| x.as_str())).await?;
+            self.update_recovery(sender, expression.recovery().map(|x| x.as_str())).await?;
             (Envelope::ok(), None)
         } else if function == &GET_RECOVERY_FUNCTION {
             let _expression = GetRecovery::try_from(body)?;
-            let recovery_method = self.get_recovery(user_id).await?;
+            let recovery_method = self.get_recovery(sender).await?;
             (Envelope::new_or_null(recovery_method), None)
         } else if function == &START_RECOVERY_FUNCTION {
             let expression = StartRecovery::try_from(body)?;
@@ -154,7 +161,7 @@ impl Depo {
         } else if function == &FINISH_RECOVERY_FUNCTION {
             let _expression = FinishRecovery::try_from(body)?;
             if let Some(state) = sealed_request.state() {
-                self.finish_recovery(state, user_id).await?;
+                self.finish_recovery(state, sender).await?;
             } else {
                 bail!("missing state");
             }
@@ -171,12 +178,17 @@ impl Depo {
 }
 
 impl Depo {
-    /// This is a Trust-On-First-Use (TOFU) function. If the provided public key is not
-    /// recognized, then a new account is created and the provided data is stored in
-    /// it. It is also used to add additional shares to an existing account. Adding an
-    /// already existing share to an account is idempotent.
-    pub async fn store_share(&self, user_id: &XID, data: impl Into<ByteString>) -> Result<Receipt> {
-        let user = self.0.expect_user_id_to_user(user_id).await?;
+    /// This is a Trust-On-First-Use (TOFU) function. If the provided XID is not
+    /// recognized, then a new account is created and the provided data is
+    /// stored in it. This function is also used to add additional shares to an
+    /// existing account. Adding an already existing share to an account is
+    /// idempotent.
+    pub async fn store_share(
+        &self,
+        sender: &XIDDocument,
+        data: impl Into<ByteString>
+    ) -> Result<Receipt> {
+        let user = self.0.xid_document_to_user(sender).await?;
         let data: ByteString = data.into();
         if data.len() > self.0.max_data_size() as usize {
             bail!("data too large");
@@ -192,9 +204,11 @@ impl Depo {
     /// from the wrong account is an error.
     pub async fn get_shares(
         &self,
-        user_id: &XID,
+        sender: &XIDDocument,
         receipts: &HashSet<Receipt>,
     ) -> Result<HashMap<Receipt, ByteString>> {
+        self.validate_sender_key(sender).await?;
+        let user_id = sender.xid();
         let user = self.0.expect_user_id_to_user(user_id).await?;
         let receipts = if receipts.is_empty() {
             self.0.id_to_receipts(user.user_id()).await?
@@ -214,10 +228,15 @@ impl Depo {
 
     /// Returns a single share corresponding to the provided receipt. Attempting to
     /// retrieve a nonexistent receipt or a receipt from the wrong account is an error.
-    pub async fn get_share(&self, user_id: &XID, receipt: &Receipt) -> Result<ByteString> {
+    pub async fn get_share(
+        &self,
+        sender: &XIDDocument,
+        receipt: &Receipt
+    ) -> Result<ByteString> {
+        self.validate_sender_key(sender).await?;
         let mut receipts = HashSet::new();
         receipts.insert(receipt.clone());
-        let result = self.get_shares(user_id, &receipts).await?;
+        let result = self.get_shares(sender, &receipts).await?;
         let result = match result.get(receipt) {
             Some(result) => result.clone(),
             None => bail!("unknown receipt"),
@@ -230,9 +249,11 @@ impl Depo {
     /// deleting nonexistent shares is not an error.
     pub async fn delete_shares(
         &self,
-        user_id: &XID,
+        sender: &XIDDocument,
         receipts: &HashSet<Receipt>,
     ) -> Result<()> {
+        self.validate_sender_key(sender).await?;
+        let user_id = sender.xid();
         let user = self.0.expect_user_id_to_user(user_id).await?;
         let recpts = if receipts.is_empty() {
             self.0.id_to_receipts(user.user_id()).await?
@@ -249,10 +270,15 @@ impl Depo {
 
     /// Deletes a single share a user controls. Deletes are idempotent; in other words,
     /// deleting a nonexistent share is not an error.
-    pub async fn delete_share(&self, user_id: &XID, receipt: &Receipt) -> Result<()> {
+    pub async fn delete_share(
+        &self,
+        sender: &XIDDocument,
+        receipt: &Receipt
+    ) -> Result<()> {
+        self.validate_sender_key(sender).await?;
         let mut receipts = HashSet::new();
         receipts.insert(receipt.clone());
-        self.delete_shares(user_id, &receipts).await?;
+        self.delete_shares(sender, &receipts).await?;
         Ok(())
     }
 
@@ -262,9 +288,11 @@ impl Depo {
     /// contact method to request a transfer token that encodes their old public key.
     pub async fn update_xid_document(
         &self,
-        user_id: &XID,
+        sender: &XIDDocument,
         new_xid_document: &XIDDocument,
     ) -> Result<()> {
+        self.validate_sender_key(sender).await?;
+        let user_id = sender.xid();
         self.0.set_user_xid_document(user_id, new_xid_document).await?;
         Ok(())
     }
@@ -272,9 +300,14 @@ impl Depo {
     /// Deletes all the shares of an account and any other data associated with it, such
     /// as the recovery contact method. Deleting an account is idempotent; in other words,
     /// deleting a nonexistent account is not an error.
-    pub async fn delete_account(&self, user_id: &XID) -> Result<()> {
+    pub async fn delete_account(
+        &self,
+        sender: &XIDDocument,
+    ) -> Result<()> {
+        let user_id = sender.xid();
         if let Some(user) = self.0.user_id_to_existing_user(user_id).await? {
-            self.delete_shares(user_id, &HashSet::new()).await?;
+            self.validate_sender_key(sender).await?;
+            self.delete_shares(sender, &HashSet::new()).await?;
             self.0.remove_user(&user).await?;
         }
         Ok(())
@@ -294,9 +327,11 @@ impl Depo {
     /// If `recovery` is `None`, then the recovery contact method is deleted.
     pub async fn update_recovery(
         &self,
-        user_id: &XID,
+        sender: &XIDDocument,
         recovery: Option<&str>,
     ) -> Result<()> {
+        self.validate_sender_key(sender).await?;
+        let user_id = sender.xid();
         let user = self.0.expect_user_id_to_user(user_id).await?;
         // Recovery methods must be unique
         if let Some(non_opt_recovery) = recovery {
@@ -316,7 +351,12 @@ impl Depo {
     }
 
     /// Retrieves an account's recovery contact method, if any.
-    pub async fn get_recovery(&self, user_id: &XID) -> Result<Option<String>> {
+    pub async fn get_recovery(
+        &self,
+        sender: &XIDDocument,
+    ) -> Result<Option<String>> {
+        self.validate_sender_key(sender).await?;
+        let user_id = sender.xid();
         let user = self.0.expect_user_id_to_user(user_id).await?;
         let recovery = user.recovery().map(|s| s.to_string());
         Ok(recovery)
@@ -349,11 +389,6 @@ impl Depo {
             Some(user) => user,
             None => bail!("unknown recovery"),
         };
-        // Ensure there is no account with the new public key
-        let existing_user = self.0.user_id_to_existing_user(user.user_id()).await?;
-        if existing_user.is_some() {
-            bail!("public key already in use");
-        }
         let recovery_continuation = RecoveryContinuation::new(
             user.user_id().clone(),
             new_xid_document.clone(),
@@ -366,7 +401,7 @@ impl Depo {
 
     /// Completes a reset of the account's public key. This is called after the
     /// user has confirmed the change via their recovery contact method.
-    pub async fn finish_recovery(&self, continuation_envelope: &Envelope, user_id: &XID) -> Result<()> {
+    pub async fn finish_recovery(&self, continuation_envelope: &Envelope, sender: &XIDDocument) -> Result<()> {
         let continuation = RecoveryContinuation::try_from(continuation_envelope.clone())?;
         // Ensure the continuation is valid
         let seconds_until_expiry = continuation.expiry().clone() - dcbor::Date::now();
@@ -375,8 +410,8 @@ impl Depo {
         }
 
         // Ensure the user's public key used to sign the request matches the new public key in the continuation
-        if continuation.new_xid_document().xid() != user_id {
-            bail!("invalid user id");
+        if continuation.new_xid_document().verification_key() != sender.verification_key() {
+            bail!("incorrect verification key");
         }
 
         // Ensure the recovery has been verified.

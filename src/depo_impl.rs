@@ -41,6 +41,19 @@ pub trait DepoImpl {
         Ok(result)
     }
 
+    async fn xid_document_to_user(&self, xid_document: &XIDDocument) -> Result<User> {
+        let maybe_user = self.user_id_to_existing_user(xid_document.xid()).await?;
+        let user = match maybe_user {
+            Some(user) => user,
+            None => {
+                let user = User::new(xid_document.clone());
+                self.insert_user(&user).await?;
+                user
+            }
+        };
+        Ok(user)
+    }
+
     async fn expect_user_id_to_user(&self, user_id: &XID) -> Result<User> {
         let user = match self.user_id_to_existing_user(user_id).await? {
             Some(user) => user,

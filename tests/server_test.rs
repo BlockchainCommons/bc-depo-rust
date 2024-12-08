@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use bc_envelope::prelude::*;
 use bc_xid::{Key, XIDDocument};
-use depo::{Depo, start_server, setup_log, create_db_if_needed};
+use depo::{create_db_if_needed, reset_db, setup_log, start_server, Depo};
 use gstp::prelude::*;
 use log::{warn, info};
 use reqwest::{self, Client, StatusCode};
@@ -58,6 +58,7 @@ async fn test_db_depo() {
     bc_envelope::register_tags();
     setup_log();
     let schema_name = "test_db_depo";
+    // reset_db(schema_name).await.unwrap();
     if let Err(e) = create_db_if_needed(schema_name).await {
         warn!("{}", Yellow.paint(format!("Skipping `{}` because can't connect to the database.", schema_name)).to_string());
         warn!("{}", Yellow.paint(format!("{}", e)).to_string());
@@ -77,6 +78,7 @@ async fn test_server_depo() {
     setup_log();
     let schema_name = "test_server_depo";
     let port: u16 = 5333;
+    reset_db(schema_name).await.unwrap();
     if let Err(e) = create_db_if_needed(schema_name).await {
         warn!("{}", Yellow.paint(format!("Skipping `{}` because can't connect to the database.", schema_name)).to_string());
         warn!("{}", Yellow.paint(format!("{}", e)).to_string());
@@ -226,7 +228,10 @@ async fn server_call_error_contains(
     expected_error: &str,
 ) -> SealedResponse {
     let sealed_response = server_call(body, client_private_key, sender, peer_continuation, context).await.unwrap();
-    assert!(sealed_response.extract_error::<String>().unwrap().contains(expected_error));
+    let error_message = sealed_response.extract_error::<String>().unwrap();
+    if !error_message.contains(expected_error) {
+        panic!("🔥 error_message: '{error_message}', does not contain expected: '{expected_error}'");
+    }
     sealed_response
 }
 
@@ -315,7 +320,7 @@ pub async fn test_depo_scenario(context: &Context<'_>) {
     let nonexistent_private_key = PrivateKeyBase::new();
     let nonexistent_xid_document = XIDDocument::from(nonexistent_private_key.schnorr_public_key_base());
     let body = GetShares::new_all_shares();
-    server_call_error_contains(&body, &nonexistent_private_key, &nonexistent_xid_document, None, context, "unknown public key").await;
+    server_call_error_contains(&body, &nonexistent_private_key, &nonexistent_xid_document, None, context, "unknown user XID").await;
 
     alert!("Alice attempts to retrieve her shares using the incorrect depo public key");
     let body = GetShares::new_all_shares();
@@ -369,7 +374,7 @@ pub async fn test_depo_scenario(context: &Context<'_>) {
 
     alert!("Someone attempts to retrieve the recovery method for a nonexistent account");
     let body = GetRecovery::new();
-    server_call_error_contains(&body, &nonexistent_private_key, &nonexistent_xid_document, None, context, "unknown public key").await;
+    server_call_error_contains(&body, &nonexistent_private_key, &nonexistent_xid_document, None, context, "unknown user XID").await;
 
     section!("Alice updates her XIDDocument to a new one");
     let alice_private_key_2 = PrivateKeyBase::new();
@@ -381,7 +386,7 @@ pub async fn test_depo_scenario(context: &Context<'_>) {
 
     alert!("Alice can no longer retrieve her shares using the old public key");
     let body = GetShares::new_all_shares();
-    server_call_error_contains(&body, &alice_private_key_1, &alice_xid_document_1, None, context, "unknown public key").await;
+    server_call_error_contains(&body, &alice_private_key_1, &alice_xid_document_1, None, context, "invalid sender verification key").await;
 
     section!("Alice must now use her new public key");
     let body = GetShares::new_all_shares();
@@ -390,7 +395,9 @@ pub async fn test_depo_scenario(context: &Context<'_>) {
 
     section!("Bob has lost his public key, so he wants to replace it with a new one");
     let bob_private_key_2 = PrivateKeyBase::new();
-    let bob_xid_document_2 = XIDDocument::new(bob_private_key_2.schnorr_public_key_base());
+    let mut bob_xid_document_2 = bob_xid_document_1.clone();
+    bob_xid_document_2.remove_inception_key();
+    bob_xid_document_2.add_key(Key::new_allow_all(bob_private_key_2.schnorr_public_key_base()));
 
     alert!("Bob requests transfer using an incorrect recovery method");
     let incorrect_recovery = "wrong@example.com";
@@ -409,7 +416,7 @@ pub async fn test_depo_scenario(context: &Context<'_>) {
 
     alert!("Bob attempts to use the recovery continuation to finish setting his new public key, but the request is incorrectly signed by his old key");
     let body = FinishRecovery::new();
-    server_call_error_contains(&body, &bob_private_key_1, &bob_xid_document_1, Some(continuation.clone()), context, "invalid user signing key").await;
+    server_call_error_contains(&body, &bob_private_key_1, &bob_xid_document_1, Some(continuation.clone()), context, "incorrect verification key").await;
 
     section!("Bob uses the recovery continuation to finish setting his new public key, properly signed by his new key");
     let body = FinishRecovery::new();
@@ -417,7 +424,7 @@ pub async fn test_depo_scenario(context: &Context<'_>) {
 
     alert!("Bob can no longer retrieve his shares using the old public key");
     let body = GetShares::new_all_shares();
-    server_call_error_contains(&body, &bob_private_key_1, &bob_xid_document_1, None, context, "unknown public key").await;
+    server_call_error_contains(&body, &bob_private_key_1, &bob_xid_document_1, None, context, "invalid sender verification key").await;
 
     section!("Bob must now use his new public key");
     let body = GetShares::new_all_shares();
@@ -430,11 +437,11 @@ pub async fn test_depo_scenario(context: &Context<'_>) {
 
     alert!("Bob can no longer retrieve his shares using the new public key");
     let body = GetShares::new_all_shares();
-    server_call_error_contains(&body, &bob_private_key_2, &bob_xid_document_2, None, context, "unknown public key").await;
+    server_call_error_contains(&body, &bob_private_key_2, &bob_xid_document_2, None, context, "unknown user XID").await;
 
     alert!("Attempting to retrieve his recovery method now throws an error");
     let body = GetRecovery::new();
-    server_call_error_contains(&body, &bob_private_key_2, &bob_xid_document_2, None, context, "unknown public key").await;
+    server_call_error_contains(&body, &bob_private_key_2, &bob_xid_document_2, None, context, "unknown user XID").await;
 
     section!("Deleting an account is idempotent");
     let body = DeleteAccount::new();
