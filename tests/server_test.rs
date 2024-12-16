@@ -380,7 +380,7 @@ pub async fn test_depo_scenario(context: &Context<'_>) {
     let alice_private_key_2 = PrivateKeyBase::new();
     let mut alice_xid_document_2 = alice_xid_document_1.clone();
     alice_xid_document_2.remove_inception_key();
-    alice_xid_document_2.add_key(Key::new_allow_all(alice_private_key_2.schnorr_public_key_base()));
+    alice_xid_document_2.add_key(Key::new_allow_all(alice_private_key_2.schnorr_public_key_base())).unwrap();
     let body = UpdateXIDDocument::new(alice_xid_document_2.clone());
     server_call_ok(&body, &alice_private_key_1, &alice_xid_document_1, None, context).await;
 
@@ -397,7 +397,7 @@ pub async fn test_depo_scenario(context: &Context<'_>) {
     let bob_private_key_2 = PrivateKeyBase::new();
     let mut bob_xid_document_2 = bob_xid_document_1.clone();
     bob_xid_document_2.remove_inception_key();
-    bob_xid_document_2.add_key(Key::new_allow_all(bob_private_key_2.schnorr_public_key_base()));
+    bob_xid_document_2.add_key(Key::new_allow_all(bob_private_key_2.schnorr_public_key_base())).unwrap();
 
     alert!("Bob requests transfer using an incorrect recovery method");
     let incorrect_recovery = "wrong@example.com";
