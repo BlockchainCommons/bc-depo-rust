@@ -1,7 +1,7 @@
 use std::{collections::{HashSet, HashMap}, sync::Arc};
 
 use async_trait::async_trait;
-use bc_components::{PrivateKeyBase, XID};
+use bc_components::{PrivateKeyBase, PublicKeyBaseProvider, XID};
 use bc_xid::XIDDocument;
 use tokio::sync::RwLock;
 use depo_api::receipt::Receipt;
@@ -27,7 +27,7 @@ struct MemDepoImpl {
 impl MemDepoImpl {
     fn new() -> Arc<Self> {
         let private_key = PrivateKeyBase::new();
-        let public_xid_document = XIDDocument::from(private_key.schnorr_public_key_base());
+        let public_xid_document = XIDDocument::from(private_key.public_key_base());
         let public_xid_document_string = public_xid_document.ur_string();
         Arc::new(Self {
             private_key,
@@ -122,7 +122,7 @@ impl DepoImpl for MemDepoImpl {
     async fn set_user_xid_document(&self, user_id: &XID, new_xid_document: &XIDDocument) -> Result<()> {
         let user = self.expect_user_id_to_user(user_id).await?;
         let mut write = self.inner.write().await;
-        let user = write.id_to_user.get_mut(user.user_id()).unwrap();
+        let user = write.id_to_user.get_mut(&user.user_id()).unwrap();
         user.set_xid_document(new_xid_document);
         Ok(())
     }
@@ -145,7 +145,7 @@ impl DepoImpl for MemDepoImpl {
             write.recovery_to_id.insert(recovery.to_string(), user.user_id().clone());
         }
         // Set the user record to the new recovery
-        let user = write.id_to_user.get_mut(user.user_id()).unwrap();
+        let user = write.id_to_user.get_mut(&user.user_id()).unwrap();
         user.set_recovery(recovery);
         Ok(())
     }
@@ -154,8 +154,8 @@ impl DepoImpl for MemDepoImpl {
         let mut write = self.inner.write().await;
 
         write.recovery_to_id.remove(user.recovery().unwrap_or_default());
-        write.id_to_user.remove(user.user_id());
-        write.id_to_receipts.remove(user.user_id());
+        write.id_to_user.remove(&user.user_id());
+        write.id_to_receipts.remove(&user.user_id());
         Ok(())
     }
 

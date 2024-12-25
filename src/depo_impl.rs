@@ -2,7 +2,7 @@ use std::collections::HashSet;
 
 use anyhow::{bail, Result};
 use async_trait::async_trait;
-use bc_components::XID;
+use bc_components::{XID, XIDProvider};
 use bc_envelope::PrivateKeyBase;
 use bc_xid::XIDDocument;
 use depo_api::receipt::Receipt;
@@ -42,7 +42,7 @@ pub trait DepoImpl {
     }
 
     async fn xid_document_to_user(&self, xid_document: &XIDDocument) -> Result<User> {
-        let maybe_user = self.user_id_to_existing_user(xid_document.xid()).await?;
+        let maybe_user = self.user_id_to_existing_user(&xid_document.xid()).await?;
         let user = match maybe_user {
             Some(user) => user,
             None => {

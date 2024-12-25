@@ -2,7 +2,7 @@ use std::{collections::HashSet, sync::Arc};
 
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
-use bc_components::{PrivateKeyBase, XID};
+use bc_components::{PrivateKeyBase, PublicKeyBaseProvider, XID};
 use bc_envelope::prelude::*;
 use bc_xid::XIDDocument;
 use depo_api::receipt::Receipt;
@@ -39,7 +39,7 @@ impl DbDepoImpl {
         let pool = db_pool(&schema_name);
         let (private_key, continuation_expiry_seconds, max_data_size) =
             get_settings(&pool, &schema_name).await?;
-        let public_xid_document = XIDDocument::from(private_key.schnorr_public_key_base());
+        let public_xid_document = XIDDocument::from(private_key.public_key_base());
         let public_xid_document_string = public_xid_document.ur_string();
         Ok(Arc::new(Self {
             schema_name,

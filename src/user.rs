@@ -1,4 +1,4 @@
-use bc_components::XID;
+use bc_components::{XID, XIDProvider};
 use bc_xid::XIDDocument;
 
 #[derive(Debug, Clone)]
@@ -19,7 +19,7 @@ impl User {
         }
     }
 
-    pub fn user_id(&self) -> &XID {
+    pub fn user_id(&self) -> XID {
         self.xid_document.xid()
     }
 

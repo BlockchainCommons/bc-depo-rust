@@ -8,7 +8,7 @@ use reqwest::{self, Client, StatusCode};
 use tokio::time::sleep;
 use std::time::Duration;
 use url::Url;
-use bc_components::{PrivateKeyBase, ARID};
+use bc_components::{PrivateKeyBase, PublicKeyBaseProvider, ARID};
 use nu_ansi_term::Color::{Red, Blue, Yellow};
 use anyhow::Result;
 use depo_api::{
@@ -267,9 +267,9 @@ fn hex_bytes(hex: &str) -> ByteString {
 
 pub async fn test_depo_scenario(context: &Context<'_>) {
     let alice_private_key_1 = PrivateKeyBase::new();
-    let alice_xid_document_1 = XIDDocument::from(alice_private_key_1.schnorr_public_key_base());
+    let alice_xid_document_1 = XIDDocument::from(alice_private_key_1.public_key_base());
     let bob_private_key_1 = PrivateKeyBase::new();
-    let bob_xid_document_1 = XIDDocument::from(bob_private_key_1.schnorr_public_key_base());
+    let bob_xid_document_1 = XIDDocument::from(bob_private_key_1.public_key_base());
 
     section!("Alice stores a share");
     let alice_data_1 = hex_bytes("cafebabe");
@@ -318,7 +318,7 @@ pub async fn test_depo_scenario(context: &Context<'_>) {
 
     alert!("Someone attempts to retrieve all shares from a nonexistent account");
     let nonexistent_private_key = PrivateKeyBase::new();
-    let nonexistent_xid_document = XIDDocument::from(nonexistent_private_key.schnorr_public_key_base());
+    let nonexistent_xid_document = XIDDocument::from(nonexistent_private_key.public_key_base());
     let body = GetShares::new_all_shares();
     server_call_error_contains(&body, &nonexistent_private_key, &nonexistent_xid_document, None, context, "unknown user XID").await;
 
@@ -380,7 +380,7 @@ pub async fn test_depo_scenario(context: &Context<'_>) {
     let alice_private_key_2 = PrivateKeyBase::new();
     let mut alice_xid_document_2 = alice_xid_document_1.clone();
     alice_xid_document_2.remove_inception_key();
-    alice_xid_document_2.add_key(Key::new_allow_all(alice_private_key_2.schnorr_public_key_base())).unwrap();
+    alice_xid_document_2.add_key(Key::new_allow_all(alice_private_key_2.public_key_base())).unwrap();
     let body = UpdateXIDDocument::new(alice_xid_document_2.clone());
     server_call_ok(&body, &alice_private_key_1, &alice_xid_document_1, None, context).await;
 
@@ -397,7 +397,7 @@ pub async fn test_depo_scenario(context: &Context<'_>) {
     let bob_private_key_2 = PrivateKeyBase::new();
     let mut bob_xid_document_2 = bob_xid_document_1.clone();
     bob_xid_document_2.remove_inception_key();
-    bob_xid_document_2.add_key(Key::new_allow_all(bob_private_key_2.schnorr_public_key_base())).unwrap();
+    bob_xid_document_2.add_key(Key::new_allow_all(bob_private_key_2.public_key_base())).unwrap();
 
     alert!("Bob requests transfer using an incorrect recovery method");
     let incorrect_recovery = "wrong@example.com";
