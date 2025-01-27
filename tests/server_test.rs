@@ -36,7 +36,7 @@ impl Context<'_> {
         Context { depo_xid_document, depo }
     }
 
-    fn with_xid_document<'a>(&'a self, xid_document: &'a XIDDocument) -> Context<'_> {
+    fn with_xid_document<'a>(&'a self, xid_document: &'a XIDDocument) -> Context<'a> {
         Context::new(xid_document, self.depo)
     }
 }
