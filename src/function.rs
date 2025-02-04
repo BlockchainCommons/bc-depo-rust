@@ -1,9 +1,9 @@
 use std::{collections::{HashMap, HashSet}, sync::Arc, time::Duration};
 
 use anyhow::{bail, Result};
-use bc_envelope::{prelude::*, PrivateKeyBase};
+use bc_envelope::prelude::*;
 use bc_xid::XIDDocument;
-use bc_components::XIDProvider;
+use bc_components::{PrivateKeys, XIDProvider};
 use dcbor::Date;
 use depo_api::{
     util::{Abbrev, FlankedFunction},
@@ -42,8 +42,8 @@ impl Depo {
         Self(inner)
     }
 
-    pub fn private_key_base(&self) -> &PrivateKeyBase {
-        self.0.private_key()
+    pub fn private_keys(&self) -> &PrivateKeys {
+        self.0.private_keys()
     }
 
     pub fn public_xid_document(&self) -> &XIDDocument {
@@ -63,7 +63,7 @@ impl Depo {
                 error!("unknown: invalid request");
                 let sealed_response = SealedResponse::new_early_failure(self.public_xid_document())
                     .with_error("invalid request");
-                sealed_response.to_envelope(None, Some(self.private_key_base()), None).unwrap().ur_string()
+                sealed_response.to_envelope(None, Some(self.private_keys()), None).unwrap().ur_string()
             }
         }
     }
@@ -83,7 +83,7 @@ impl Depo {
     }
 
     pub async fn handle_unverified_request(&self, encrypted_request: Envelope) -> Result<Envelope> {
-        let sealed_request = SealedRequest::try_from_envelope(&encrypted_request, None, None, self.private_key_base())?;
+        let sealed_request = SealedRequest::try_from_envelope(&encrypted_request, None, None, self.private_keys())?;
         let id = sealed_request.id().clone();
         let function = sealed_request.function().clone();
         let sender = sealed_request.sender().clone();
@@ -106,7 +106,7 @@ impl Depo {
         };
 
         let state_expiry_date = Date::now() + Duration::from_secs(self.0.continuation_expiry_seconds());
-        let sealed_envelope = sealed_response.to_envelope(Some(&state_expiry_date), Some(self.private_key_base()), Some(&sender)).unwrap();
+        let sealed_envelope = sealed_response.to_envelope(Some(&state_expiry_date), Some(self.private_keys()), Some(&sender)).unwrap();
         Ok(sealed_envelope)
     }
 

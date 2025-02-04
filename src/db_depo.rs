@@ -2,8 +2,8 @@ use std::{collections::HashSet, sync::Arc};
 
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
-use bc_components::{PrivateKeyBase, PublicKeyBaseProvider, XID};
-use bc_envelope::prelude::*;
+use bc_components::{keypair, PrivateKeys, XID};
+use bc_envelope::{prelude::*, PublicKeys};
 use bc_xid::XIDDocument;
 use depo_api::receipt::Receipt;
 use mysql_async::{prelude::*, Pool, Row};
@@ -26,7 +26,7 @@ const SETTINGS_TABLE_NAME: &str = "settings";
 struct DbDepoImpl {
     schema_name: String,
     pool: Pool,
-    private_key: PrivateKeyBase,
+    private_keys: PrivateKeys,
     public_xid_document: XIDDocument,
     public_xid_document_string: String,
     continuation_expiry_seconds: u64,
@@ -37,14 +37,14 @@ impl DbDepoImpl {
     async fn new(schema_name: impl AsRef<str>) -> Result<Arc<Self>> {
         let schema_name = schema_name.as_ref().to_string();
         let pool = db_pool(&schema_name);
-        let (private_key, continuation_expiry_seconds, max_data_size) =
+        let (private_keys, public_keys, continuation_expiry_seconds, max_data_size) =
             get_settings(&pool, &schema_name).await?;
-        let public_xid_document = XIDDocument::from(private_key.public_key_base());
+        let public_xid_document = XIDDocument::from(public_keys);
         let public_xid_document_string = public_xid_document.ur_string();
         Ok(Arc::new(Self {
             schema_name,
             pool,
-            private_key,
+            private_keys,
             public_xid_document,
             public_xid_document_string,
             continuation_expiry_seconds,
@@ -60,20 +60,24 @@ impl DbDepoImpl {
 async fn get_settings(
     pool: &Pool,
     schema_name: &str,
-) -> Result<(PrivateKeyBase, u64, u32)> {
+) -> Result<(PrivateKeys, PublicKeys, u64, u32)> {
     let mut conn = pool.get_conn().await?;
     let query = format!(r"
-        SELECT private_key, continuation_expiry_seconds, max_data_size
+        SELECT private_keys, public_keys, continuation_expiry_seconds, max_data_size
         FROM {schema_name}.{SETTINGS_TABLE_NAME}
     ");
 
     let result: Option<Row> = conn.query_first(query).await?;
     match result {
         Some(row) => {
-            let private_key_string: String = row
-                .get("private_key")
-                .ok_or_else(|| anyhow!("Private key not found"))?;
-            let private_key = PrivateKeyBase::from_ur_string(private_key_string)?;
+            let private_keys_string: String = row
+                .get("private_keys")
+                .ok_or_else(|| anyhow!("Private keys not found"))?;
+            let private_keys = PrivateKeys::from_ur_string(private_keys_string)?;
+            let public_keys_string: String = row
+                .get("public_keys")
+                .ok_or_else(|| anyhow!("Public keys not found"))?;
+            let public_keys = PublicKeys::from_ur_string(public_keys_string)?;
             let continuation_expiry_seconds: u64 = row
                 .get("continuation_expiry_seconds")
                 .ok_or_else(|| anyhow!("Continuation expiry seconds not found"))?;
@@ -81,7 +85,7 @@ async fn get_settings(
                 .get("max_data_size")
                 .ok_or_else(|| anyhow!("Max payload size not found"))?;
 
-            Ok((private_key, continuation_expiry_seconds, max_data_size))
+            Ok((private_keys, public_keys, continuation_expiry_seconds, max_data_size))
         }
         None => Err(anyhow!("Settings not found")),
     }
@@ -97,8 +101,8 @@ impl DepoImpl for DbDepoImpl {
         self.continuation_expiry_seconds
     }
 
-    fn private_key(&self) -> &PrivateKeyBase {
-        &self.private_key
+    fn private_keys(&self) -> &PrivateKeys {
+        &self.private_keys
     }
 
     fn public_xid_document(&self) -> &XIDDocument {
@@ -362,7 +366,8 @@ pub async fn create_db(server_pool: &Pool, schema_name: &str) -> Result<()> {
     server_pool.get_conn().await?.query_drop(query).await?;
     let query = format!(r"
         CREATE TABLE IF NOT EXISTS {schema_name}.{SETTINGS_TABLE_NAME} (
-            private_key VARCHAR(120),
+            private_keys VARCHAR(500),
+            public_keys VARCHAR(500),
             continuation_expiry_seconds INT UNSIGNED,
             max_data_size INT UNSIGNED
         )
@@ -381,12 +386,14 @@ pub async fn create_db(server_pool: &Pool, schema_name: &str) -> Result<()> {
 
     // Only insert if settings do not exist
     if count == 0 {
-        let private_key = PrivateKeyBase::new().ur_string();
+        let (private_keys, public_keys) = keypair();
+        let private_keys = private_keys.ur_string();
+        let public_keys = public_keys.ur_string();
 
         let query = format!(r"
             INSERT INTO {schema_name}.{SETTINGS_TABLE_NAME}
-            (private_key, continuation_expiry_seconds, max_data_size)
-            VALUES ('{private_key}', {CONTINUATION_EXPIRY_SECONDS}, {MAX_DATA_SIZE})
+            (private_keys, public_keys, continuation_expiry_seconds, max_data_size)
+            VALUES ('{private_keys}', '{public_keys}', {CONTINUATION_EXPIRY_SECONDS}, {MAX_DATA_SIZE})
         ");
         server_pool.get_conn().await?.query_drop(query).await?;
     }

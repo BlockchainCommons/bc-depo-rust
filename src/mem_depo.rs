@@ -1,7 +1,7 @@
 use std::{collections::{HashSet, HashMap}, sync::Arc};
 
 use async_trait::async_trait;
-use bc_components::{PrivateKeyBase, PublicKeyBaseProvider, XID};
+use bc_components::{keypair, PrivateKeys, XID};
 use bc_xid::XIDDocument;
 use tokio::sync::RwLock;
 use depo_api::receipt::Receipt;
@@ -18,7 +18,7 @@ struct Inner {
 }
 
 struct MemDepoImpl {
-    private_key: PrivateKeyBase,
+    private_keys: PrivateKeys,
     public_xid_document: XIDDocument,
     public_xid_document_string: String,
     inner: RwLock<Inner>,
@@ -26,11 +26,11 @@ struct MemDepoImpl {
 
 impl MemDepoImpl {
     fn new() -> Arc<Self> {
-        let private_key = PrivateKeyBase::new();
-        let public_xid_document = XIDDocument::from(private_key.public_key_base());
+        let (private_keys, public_keys) = keypair();
+        let public_xid_document = XIDDocument::from(public_keys);
         let public_xid_document_string = public_xid_document.ur_string();
         Arc::new(Self {
-            private_key,
+            private_keys,
             public_xid_document,
             public_xid_document_string,
             inner: RwLock::new(Inner {
@@ -68,8 +68,8 @@ impl DepoImpl for MemDepoImpl {
         CONTINUATION_EXPIRY_SECONDS
     }
 
-    fn private_key(&self) -> &PrivateKeyBase {
-        &self.private_key
+    fn private_keys(&self) -> &PrivateKeys {
+        &self.private_keys
     }
 
     fn public_xid_document(&self) -> &XIDDocument {

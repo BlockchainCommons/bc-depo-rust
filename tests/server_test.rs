@@ -8,7 +8,7 @@ use reqwest::{self, Client, StatusCode};
 use tokio::time::sleep;
 use std::time::Duration;
 use url::Url;
-use bc_components::{PrivateKeyBase, PublicKeyBaseProvider, ARID};
+use bc_components::{keypair, PrivateKeys, ARID};
 use nu_ansi_term::Color::{Red, Blue, Yellow};
 use anyhow::Result;
 use depo_api::{
@@ -58,7 +58,7 @@ async fn test_db_depo() {
     bc_envelope::register_tags();
     setup_log();
     let schema_name = "test_db_depo";
-    // reset_db(schema_name).await.unwrap();
+    reset_db(schema_name).await.unwrap();
     if let Err(e) = create_db_if_needed(schema_name).await {
         warn!("{}", Yellow.paint(format!("Skipping `{}` because can't connect to the database.", schema_name)).to_string());
         warn!("{}", Yellow.paint(format!("{}", e)).to_string());
@@ -176,7 +176,7 @@ async fn get_public_key(client: &ClientRequestHandler) -> Result<XIDDocument> {
 
 async fn server_call(
     body: &dyn IntoExpression,
-    client_private_key: &PrivateKeyBase,
+    client_private_keys: &PrivateKeys,
     sender: &XIDDocument,
     peer_continuation: Option<Envelope>,
     context: &Context<'_>,
@@ -184,28 +184,28 @@ async fn server_call(
     let id = ARID::new();
     let sealed_request = SealedRequest::new_with_body(body.to_expression(), id, sender)
         .with_optional_peer_continuation(peer_continuation);
-    let encrypted_request = sealed_request.to_envelope(None, Some(client_private_key), Some(context.depo_xid_document)).unwrap();
+    let encrypted_request = sealed_request.to_envelope(None, Some(client_private_keys), Some(context.depo_xid_document)).unwrap();
 
     let raw_response = context.depo.handle_encrypted_request(encrypted_request).await;
 
-    SealedResponse::try_from_encrypted_envelope(&raw_response, None, None, client_private_key)
+    SealedResponse::try_from_encrypted_envelope(&raw_response, None, None, client_private_keys)
 }
 
 async fn server_call_ok(
     body: &dyn IntoExpression,
-    client_private_key: &PrivateKeyBase,
+    client_private_keys: &PrivateKeys,
     sender: &XIDDocument,
     peer_continuation: Option<Envelope>,
     context: &Context<'_>,
 ) -> SealedResponse {
-    let sealed_response = server_call(body, client_private_key, sender, peer_continuation, context).await.unwrap();
+    let sealed_response = server_call(body, client_private_keys, sender, peer_continuation, context).await.unwrap();
     assert!(sealed_response.is_ok());
     sealed_response
 }
 
 async fn server_call_ok_into_result<T>(
     body: &dyn IntoExpression,
-    client_private_key: &PrivateKeyBase,
+    client_private_keys: &PrivateKeys,
     sender: &XIDDocument,
     peer_continuation: Option<Envelope>,
     context: &Context<'_>,
@@ -214,20 +214,20 @@ where
     T: TryFrom<SealedResponse>,
     <T as TryFrom<SealedResponse>>::Error: std::fmt::Debug
 {
-    let sealed_response = server_call(body, client_private_key, sender, peer_continuation, context).await.unwrap();
+    let sealed_response = server_call(body, client_private_keys, sender, peer_continuation, context).await.unwrap();
     let t = T::try_from(sealed_response.clone()).unwrap();
     (t, sealed_response)
 }
 
 async fn server_call_error_contains(
     body: &dyn IntoExpression,
-    client_private_key: &PrivateKeyBase,
+    client_private_keys: &PrivateKeys,
     sender: &XIDDocument,
     peer_continuation: Option<Envelope>,
     context: &Context<'_>,
     expected_error: &str,
 ) -> SealedResponse {
-    let sealed_response = server_call(body, client_private_key, sender, peer_continuation, context).await.unwrap();
+    let sealed_response = server_call(body, client_private_keys, sender, peer_continuation, context).await.unwrap();
     let error_message = sealed_response.extract_error::<String>().unwrap();
     if !error_message.contains(expected_error) {
         panic!("🔥 error_message: '{error_message}', does not contain expected: '{expected_error}'");
@@ -237,13 +237,13 @@ async fn server_call_error_contains(
 
 async fn server_call_early_error_contains(
     body: &dyn IntoExpression,
-    client_private_key: &PrivateKeyBase,
+    client_private_keys: &PrivateKeys,
     sender: &XIDDocument,
     peer_continuation: Option<Envelope>,
     context: &Context<'_>,
     expected_error: &str,
 ) {
-    let early_result = server_call(body, client_private_key, sender, peer_continuation, context).await;
+    let early_result = server_call(body, client_private_keys, sender, peer_continuation, context).await;
     assert!(early_result.err().unwrap().to_string().contains(expected_error));
 }
 
@@ -266,147 +266,148 @@ fn hex_bytes(hex: &str) -> ByteString {
 }
 
 pub async fn test_depo_scenario(context: &Context<'_>) {
-    let alice_private_key_1 = PrivateKeyBase::new();
-    let alice_xid_document_1 = XIDDocument::from(alice_private_key_1.public_key_base());
-    let bob_private_key_1 = PrivateKeyBase::new();
-    let bob_xid_document_1 = XIDDocument::from(bob_private_key_1.public_key_base());
+    let (alice_private_keys_1, alice_public_keys_1) = keypair();
+    let alice_xid_document_1 = XIDDocument::from(alice_public_keys_1);
+
+    let (bob_private_keys_1, bob_public_keys_1) = keypair();
+    let bob_xid_document_1 = XIDDocument::from(bob_public_keys_1);
 
     section!("Alice stores a share");
     let alice_data_1 = hex_bytes("cafebabe");
     let body = StoreShare::new(alice_data_1.clone());
-    let (result, _): (StoreShareResult, _) = server_call_ok_into_result(&body, &alice_private_key_1, &alice_xid_document_1, None, context).await;
+    let (result, _): (StoreShareResult, _) = server_call_ok_into_result(&body, &alice_private_keys_1, &alice_xid_document_1, None, context).await;
     let alice_receipt_1 = result.receipt();
 
     section!("Bob stores a share");
     let bob_data_1 = hex_bytes("deadbeef");
     let body = StoreShare::new(bob_data_1.clone());
-    let (result, _): (StoreShareResult, _) = server_call_ok_into_result(&body, &bob_private_key_1, &bob_xid_document_1, None, context).await;
+    let (result, _): (StoreShareResult, _) = server_call_ok_into_result(&body, &bob_private_keys_1, &bob_xid_document_1, None, context).await;
     let bob_receipt_1 = result.receipt();
 
     section!("Alice retrieves her share");
     let body = GetShares::new(vec![alice_receipt_1]);
-    let (result, _): (GetSharesResult, _) = server_call_ok_into_result(&body, &alice_private_key_1, &alice_xid_document_1, None, context).await;
+    let (result, _): (GetSharesResult, _) = server_call_ok_into_result(&body, &alice_private_keys_1, &alice_xid_document_1, None, context).await;
     assert_eq!(result.data_for_receipt(alice_receipt_1), Some(&alice_data_1));
 
     section!("Bob retrieves his share");
     let body = GetShares::new(vec![bob_receipt_1]);
-    let (result, _): (GetSharesResult, _) = server_call_ok_into_result(&body, &bob_private_key_1, &bob_xid_document_1, None, context).await;
+    let (result, _): (GetSharesResult, _) = server_call_ok_into_result(&body, &bob_private_keys_1, &bob_xid_document_1, None, context).await;
     assert_eq!(result.data_for_receipt(bob_receipt_1), Some(&bob_data_1));
 
     section!("Alice stores a second share");
     let alice_data_2 = hex_bytes("cafef00d");
     let body = StoreShare::new(alice_data_2.clone());
-    let (result, _): (StoreShareResult, _) = server_call_ok_into_result(&body, &alice_private_key_1, &alice_xid_document_1, None, context).await;
+    let (result, _): (StoreShareResult, _) = server_call_ok_into_result(&body, &alice_private_keys_1, &alice_xid_document_1, None, context).await;
     let alice_receipt_2 = result.receipt();
 
     section!("Alice retrieves her second share");
     let body = GetShares::new(vec![alice_receipt_2]);
-    let (result, _): (GetSharesResult, _) = server_call_ok_into_result(&body, &alice_private_key_1, &alice_xid_document_1, None, context).await;
+    let (result, _): (GetSharesResult, _) = server_call_ok_into_result(&body, &alice_private_keys_1, &alice_xid_document_1, None, context).await;
     assert_eq!(result.data_for_receipt(alice_receipt_2), Some(&alice_data_2));
 
     section!("Alice retrieves both her shares identified only by her public key");
     let body = GetShares::new_all_shares();
-    let (result, _): (GetSharesResult, _) = server_call_ok_into_result(&body, &alice_private_key_1, &alice_xid_document_1, None, context).await;
+    let (result, _): (GetSharesResult, _) = server_call_ok_into_result(&body, &alice_private_keys_1, &alice_xid_document_1, None, context).await;
     assert_eq!(result.receipt_to_data().len(), 2);
     assert_eq!(result.data_for_receipt(alice_receipt_1), Some(&alice_data_1));
     assert_eq!(result.data_for_receipt(alice_receipt_2), Some(&alice_data_2));
 
     section!("Bob attempts to retrieve one of Alice's shares");
     let body = GetShares::new(vec![alice_receipt_1]);
-    let (result, _): (GetSharesResult, _) = server_call_ok_into_result(&body, &bob_private_key_1, &bob_xid_document_1, None, context).await;
+    let (result, _): (GetSharesResult, _) = server_call_ok_into_result(&body, &bob_private_keys_1, &bob_xid_document_1, None, context).await;
     assert_eq!(result.receipt_to_data().len(), 0);
 
     alert!("Someone attempts to retrieve all shares from a nonexistent account");
-    let nonexistent_private_key = PrivateKeyBase::new();
-    let nonexistent_xid_document = XIDDocument::from(nonexistent_private_key.public_key_base());
+    let (nonexistent_private_keys, nonexistent_public_keys) = keypair();
+    let nonexistent_xid_document = XIDDocument::from(nonexistent_public_keys);
     let body = GetShares::new_all_shares();
-    server_call_error_contains(&body, &nonexistent_private_key, &nonexistent_xid_document, None, context, "unknown user XID").await;
+    server_call_error_contains(&body, &nonexistent_private_keys, &nonexistent_xid_document, None, context, "unknown user XID").await;
 
     alert!("Alice attempts to retrieve her shares using the incorrect depo public key");
     let body = GetShares::new_all_shares();
-    server_call_early_error_contains(&body, &alice_private_key_1, &alice_xid_document_1, None, &context.with_xid_document(&nonexistent_xid_document), "unknown recipient").await;
+    server_call_early_error_contains(&body, &alice_private_keys_1, &alice_xid_document_1, None, &context.with_xid_document(&nonexistent_xid_document), "unknown recipient").await;
 
     section!("Alice stores a share she's previously stored (idempotent)");
     let body = StoreShare::new(alice_data_1.clone());
-    let (result, _): (StoreShareResult, _) = server_call_ok_into_result(&body, &alice_private_key_1, &alice_xid_document_1, None, context).await;
+    let (result, _): (StoreShareResult, _) = server_call_ok_into_result(&body, &alice_private_keys_1, &alice_xid_document_1, None, context).await;
     assert_eq!(result.receipt(), alice_receipt_1);
 
     section!("Alice deletes one of her shares");
     let body = DeleteShares::new(vec![alice_receipt_1]);
-    server_call_ok(&body, &alice_private_key_1, &alice_xid_document_1, None, context).await;
+    server_call_ok(&body, &alice_private_keys_1, &alice_xid_document_1, None, context).await;
 
     let body = GetShares::new_all_shares();
-    let (result, _): (GetSharesResult, _) = server_call_ok_into_result(&body, &alice_private_key_1, &alice_xid_document_1, None, context).await;
+    let (result, _): (GetSharesResult, _) = server_call_ok_into_result(&body, &alice_private_keys_1, &alice_xid_document_1, None, context).await;
     assert_eq!(result.receipt_to_data().len(), 1);
     assert_eq!(result.data_for_receipt(alice_receipt_2), Some(&alice_data_2));
 
     section!("Alice attempts to delete a share she already deleted (idempotent)");
     let body = DeleteShares::new(vec![alice_receipt_1]);
-    server_call_ok(&body, &alice_private_key_1, &alice_xid_document_1, None, context).await;
+    server_call_ok(&body, &alice_private_keys_1, &alice_xid_document_1, None, context).await;
 
     let body = GetShares::new_all_shares();
-    let (result, _): (GetSharesResult, _) = server_call_ok_into_result(&body, &alice_private_key_1, &alice_xid_document_1, None, context).await;
+    let (result, _): (GetSharesResult, _) = server_call_ok_into_result(&body, &alice_private_keys_1, &alice_xid_document_1, None, context).await;
     assert_eq!(result.receipt_to_data().len(), 1);
     assert_eq!(result.data_for_receipt(alice_receipt_2), Some(&alice_data_2));
 
     section!("Bob adds a recovery method");
     let bob_recovery = "bob@example.com";
     let body = UpdateRecovery::new(Some(bob_recovery.to_string()));
-    server_call_ok(&body, &bob_private_key_1, &bob_xid_document_1, None, context).await;
+    server_call_ok(&body, &bob_private_keys_1, &bob_xid_document_1, None, context).await;
 
     section!("Bob sets the same recovery method again (idempotent)");
     let body = UpdateRecovery::new(Some(bob_recovery.to_string()));
-    server_call_ok(&body, &bob_private_key_1, &bob_xid_document_1, None, context).await;
+    server_call_ok(&body, &bob_private_keys_1, &bob_xid_document_1, None, context).await;
 
     section!("Bob gets his recovery method");
     let body = GetRecovery::new();
-    let (result, _): (GetRecoveryResult, _) = server_call_ok_into_result(&body, &bob_private_key_1, &bob_xid_document_1, None, context).await;
+    let (result, _): (GetRecoveryResult, _) = server_call_ok_into_result(&body, &bob_private_keys_1, &bob_xid_document_1, None, context).await;
     assert_eq!(result.recovery(), Some(bob_recovery));
 
     section!("Alice gets her recovery method, but she has none");
     let body = GetRecovery::new();
-    let (result, _): (GetRecoveryResult, _) = server_call_ok_into_result(&body, &alice_private_key_1, &alice_xid_document_1, None, context).await;
+    let (result, _): (GetRecoveryResult, _) = server_call_ok_into_result(&body, &alice_private_keys_1, &alice_xid_document_1, None, context).await;
     assert_eq!(result.recovery(), None);
 
     alert!("Alice attempts to add a non-unique recovery method");
     let body = UpdateRecovery::new(Some(bob_recovery.to_string()));
-    server_call_error_contains(&body, &alice_private_key_1, &alice_xid_document_1, None, context, "recovery method already exists").await;
+    server_call_error_contains(&body, &alice_private_keys_1, &alice_xid_document_1, None, context, "recovery method already exists").await;
 
     alert!("Someone attempts to retrieve the recovery method for a nonexistent account");
     let body = GetRecovery::new();
-    server_call_error_contains(&body, &nonexistent_private_key, &nonexistent_xid_document, None, context, "unknown user XID").await;
+    server_call_error_contains(&body, &nonexistent_private_keys, &nonexistent_xid_document, None, context, "unknown user XID").await;
 
     section!("Alice updates her XIDDocument to a new one");
-    let alice_private_key_2 = PrivateKeyBase::new();
+    let (alice_private_keys_2, alice_public_keys_2) = keypair();
     let mut alice_xid_document_2 = alice_xid_document_1.clone();
     alice_xid_document_2.remove_inception_key();
-    alice_xid_document_2.add_key(Key::new_allow_all(alice_private_key_2.public_key_base())).unwrap();
+    alice_xid_document_2.add_key(Key::new_allow_all(&alice_public_keys_2)).unwrap();
     let body = UpdateXIDDocument::new(alice_xid_document_2.clone());
-    server_call_ok(&body, &alice_private_key_1, &alice_xid_document_1, None, context).await;
+    server_call_ok(&body, &alice_private_keys_1, &alice_xid_document_1, None, context).await;
 
     alert!("Alice can no longer retrieve her shares using the old public key");
     let body = GetShares::new_all_shares();
-    server_call_error_contains(&body, &alice_private_key_1, &alice_xid_document_1, None, context, "invalid sender verification key").await;
+    server_call_error_contains(&body, &alice_private_keys_1, &alice_xid_document_1, None, context, "invalid sender verification key").await;
 
     section!("Alice must now use her new public key");
     let body = GetShares::new_all_shares();
-    let (result, _): (GetSharesResult, _) = server_call_ok_into_result(&body, &alice_private_key_2, &alice_xid_document_2, None, context).await;
+    let (result, _): (GetSharesResult, _) = server_call_ok_into_result(&body, &alice_private_keys_2, &alice_xid_document_2, None, context).await;
     assert_eq!(result.receipt_to_data().len(), 1);
 
     section!("Bob has lost his public key, so he wants to replace it with a new one");
-    let bob_private_key_2 = PrivateKeyBase::new();
+    let (bob_private_keys_2, bob_public_keys_2) = keypair();
     let mut bob_xid_document_2 = bob_xid_document_1.clone();
     bob_xid_document_2.remove_inception_key();
-    bob_xid_document_2.add_key(Key::new_allow_all(bob_private_key_2.public_key_base())).unwrap();
+    bob_xid_document_2.add_key(Key::new_allow_all(&bob_public_keys_2)).unwrap();
 
     alert!("Bob requests transfer using an incorrect recovery method");
     let incorrect_recovery = "wrong@example.com";
     let body = StartRecovery::new(incorrect_recovery.to_string());
-    server_call_error_contains(&body, &bob_private_key_2, &bob_xid_document_2, None, context, "unknown recovery").await;
+    server_call_error_contains(&body, &bob_private_keys_2, &bob_xid_document_2, None, context, "unknown recovery").await;
 
     section!("Bob requests a transfer using the correct recovery method");
     let body = StartRecovery::new(bob_recovery.to_string());
-    let sealed_response = server_call_ok(&body, &bob_private_key_2, &bob_xid_document_2, None, context).await;
+    let sealed_response = server_call_ok(&body, &bob_private_keys_2, &bob_xid_document_2, None, context).await;
 
     // The recovery continuation is self-encrypted by the server, and is also
     // time-limited. It is sent to Bob's recovery contact method, which acts as
@@ -416,38 +417,38 @@ pub async fn test_depo_scenario(context: &Context<'_>) {
 
     alert!("Bob attempts to use the recovery continuation to finish setting his new public key, but the request is incorrectly signed by his old key");
     let body = FinishRecovery::new();
-    server_call_error_contains(&body, &bob_private_key_1, &bob_xid_document_1, Some(continuation.clone()), context, "incorrect verification key").await;
+    server_call_error_contains(&body, &bob_private_keys_1, &bob_xid_document_1, Some(continuation.clone()), context, "incorrect verification key").await;
 
     section!("Bob uses the recovery continuation to finish setting his new public key, properly signed by his new key");
     let body = FinishRecovery::new();
-    server_call_ok(&body, &bob_private_key_2, &bob_xid_document_2, Some(continuation.clone()), context).await;
+    server_call_ok(&body, &bob_private_keys_2, &bob_xid_document_2, Some(continuation.clone()), context).await;
 
     alert!("Bob can no longer retrieve his shares using the old public key");
     let body = GetShares::new_all_shares();
-    server_call_error_contains(&body, &bob_private_key_1, &bob_xid_document_1, None, context, "invalid sender verification key").await;
+    server_call_error_contains(&body, &bob_private_keys_1, &bob_xid_document_1, None, context, "invalid sender verification key").await;
 
     section!("Bob must now use his new public key");
     let body = GetShares::new_all_shares();
-    let (result, _): (GetSharesResult, _) = server_call_ok_into_result(&body, &bob_private_key_2, &bob_xid_document_2, None, context).await;
+    let (result, _): (GetSharesResult, _) = server_call_ok_into_result(&body, &bob_private_keys_2, &bob_xid_document_2, None, context).await;
     assert_eq!(result.receipt_to_data().len(), 1);
 
     section!("Bob decides to delete his account");
     let body = DeleteAccount::new();
-    server_call_ok(&body, &bob_private_key_2, &bob_xid_document_2, None, context).await;
+    server_call_ok(&body, &bob_private_keys_2, &bob_xid_document_2, None, context).await;
 
     alert!("Bob can no longer retrieve his shares using the new public key");
     let body = GetShares::new_all_shares();
-    server_call_error_contains(&body, &bob_private_key_2, &bob_xid_document_2, None, context, "unknown user XID").await;
+    server_call_error_contains(&body, &bob_private_keys_2, &bob_xid_document_2, None, context, "unknown user XID").await;
 
     alert!("Attempting to retrieve his recovery method now throws an error");
     let body = GetRecovery::new();
-    server_call_error_contains(&body, &bob_private_key_2, &bob_xid_document_2, None, context, "unknown user XID").await;
+    server_call_error_contains(&body, &bob_private_keys_2, &bob_xid_document_2, None, context, "unknown user XID").await;
 
     section!("Deleting an account is idempotent");
     let body = DeleteAccount::new();
-    server_call_ok(&body, &bob_private_key_2, &bob_xid_document_2, None, context).await;
+    server_call_ok(&body, &bob_private_keys_2, &bob_xid_document_2, None, context).await;
 
     section!("Alice deletes her account");
     let body = DeleteAccount::new();
-    server_call_ok(&body, &alice_private_key_2, &alice_xid_document_2, None, context).await;
+    server_call_ok(&body, &alice_private_keys_2, &alice_xid_document_2, None, context).await;
 }

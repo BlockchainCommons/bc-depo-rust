@@ -1,6 +1,6 @@
 [package]
 name = "depo"
-version = "0.9.0"
+version = "0.10.0"
 edition = "2021"
 description = "Server for secure and anonymous storage and retrieval of binary objects."
 authors = ["Blockchain Commons"]
@@ -12,13 +12,13 @@ keywords = ["cryptocurrency", "security", "key-management", "recovery", "server"
 categories = ["cryptography", "database", "web-programming::http-server"] # https://crates.io/category_slugs
 
 [dependencies]
-dcbor = { version = "^0.16.0", features = ["multithreaded"] }
-bc-ur = "^0.6.0"
-bc-components = "^0.15.0"
-bc-envelope = { version = "^0.21.0", features = ["multithreaded"] }
-gstp = "^0.3.0"
-depo-api = { version = "^0.9.0", features = ["multithreaded"] }
-bc-xid = "^0.3.0"
+dcbor = { version = "^0.16.2", features = ["multithreaded"] }
+bc-ur = "^0.6.2"
+bc-components = "^0.16.0"
+bc-envelope = { version = "^0.22.0", features = ["multithreaded"] }
+gstp = "^0.4.0"
+depo-api = { version = "^0.10.0", features = ["multithreaded"] }
+bc-xid = "^0.4.0"
 
 warp = "^0.3.0"
 tokio = { version = "^1.0.0", features = ["full"] }

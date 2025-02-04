@@ -2,8 +2,7 @@ use std::collections::HashSet;
 
 use anyhow::{bail, Result};
 use async_trait::async_trait;
-use bc_components::{XID, XIDProvider};
-use bc_envelope::PrivateKeyBase;
+use bc_components::{PrivateKeys, XIDProvider, XID};
 use bc_xid::XIDDocument;
 use depo_api::receipt::Receipt;
 
@@ -13,7 +12,7 @@ use crate::{user::User, record::Record};
 pub trait DepoImpl {
     fn max_data_size(&self) -> u32;
     fn continuation_expiry_seconds(&self) -> u64;
-    fn private_key(&self) -> &PrivateKeyBase;
+    fn private_keys(&self) -> &PrivateKeys;
     fn public_xid_document(&self) -> &XIDDocument;
     fn public_xid_document_string(&self) -> &str;
     async fn user_id_to_existing_user(&self, user_id: &XID) -> Result<Option<User>>;
