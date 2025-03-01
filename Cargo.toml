@@ -14,11 +14,11 @@ categories = ["cryptography", "database", "web-programming::http-server"] # http
 [dependencies]
 dcbor = { version = "^0.16.2", features = ["multithreaded"] }
 bc-ur = "^0.6.2"
-bc-components = "^0.16.0"
-bc-envelope = { version = "^0.22.0", features = ["multithreaded"] }
-gstp = "^0.4.0"
-depo-api = { version = "^0.10.0", features = ["multithreaded"] }
-bc-xid = "^0.4.0"
+bc-components = "^0.17.0"
+bc-envelope = { version = "^0.23.0", features = ["multithreaded"] }
+gstp = "^0.5.0"
+depo-api = { version = "^0.11.0", features = ["multithreaded"] }
+bc-xid = "^0.5.0"
 
 warp = "^0.3.0"
 tokio = { version = "^1.0.0", features = ["full"] }
