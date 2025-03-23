@@ -16,9 +16,9 @@ pub struct Record {
 }
 
 impl Record {
-    pub fn new(user_id: &XID, data: impl Into<ByteString>) -> Self {
+    pub fn new(user_id: XID, data: impl Into<ByteString>) -> Self {
         let data: ByteString = data.into();
-        Self::new_opt(Receipt::new(user_id, &data), user_id.clone(), data)
+        Self::new_opt(Receipt::new(user_id, &data), user_id, data)
     }
 
     pub fn new_opt(receipt: Receipt, user_id: XID, data: ByteString) -> Self {
@@ -33,8 +33,8 @@ impl Record {
         &self.receipt
     }
 
-    pub fn user_id(&self) -> &XID {
-        &self.user_id
+    pub fn user_id(&self) -> XID {
+        self.user_id
     }
 
     pub fn data(&self) -> &ByteString {

@@ -113,7 +113,7 @@ impl DepoImpl for DbDepoImpl {
         &self.public_xid_document_string
     }
 
-    async fn user_id_to_existing_user(&self, user_id: &XID) -> Result<Option<User>> {
+    async fn user_id_to_existing_user(&self, user_id: XID) -> Result<Option<User>> {
         let mut conn = self.pool.get_conn().await?;
         let query = "SELECT user_id, xid_document, recovery FROM users WHERE user_id = :user_id";
         let params = params! {
@@ -166,7 +166,7 @@ impl DepoImpl for DbDepoImpl {
         Ok(())
     }
 
-    async fn id_to_receipts(&self, user_id: &XID) -> Result<HashSet<Receipt>> {
+    async fn id_to_receipts(&self, user_id: XID) -> Result<HashSet<Receipt>> {
         let mut conn = self.pool.get_conn().await?;
         let schema_name = self.schema_name();
         let query = format!(r"
@@ -229,7 +229,7 @@ impl DepoImpl for DbDepoImpl {
 
     async fn set_user_xid_document(
         &self,
-        user_id: &XID,
+        user_id: XID,
         new_xid_document: &XIDDocument,
     ) -> Result<()> {
         let mut conn = self.pool.get_conn().await?;

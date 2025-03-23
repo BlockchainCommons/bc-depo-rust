@@ -22,8 +22,8 @@ impl RecoveryContinuation {
         }
     }
 
-    pub fn user_id(&self) -> &XID {
-        &self.user_id
+    pub fn user_id(&self) -> XID {
+        self.user_id
     }
 
     pub fn new_xid_document(&self) -> &XIDDocument {

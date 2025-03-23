@@ -80,14 +80,14 @@ impl DepoImpl for MemDepoImpl {
         &self.public_xid_document_string
     }
 
-    async fn user_id_to_existing_user(&self, user_id: &XID) -> Result<Option<User>> {
-        Ok(self.inner.read().await.id_to_user.get(user_id).cloned())
+    async fn user_id_to_existing_user(&self, user_id: XID) -> Result<Option<User>> {
+        Ok(self.inner.read().await.id_to_user.get(&user_id).cloned())
     }
 
     async fn insert_user(&self, user: &User) -> Result<()> {
         let mut write = self.inner.write().await;
-        write.id_to_user.insert(user.user_id().clone(), user.clone());
-        write.id_to_receipts.insert(user.user_id().clone(), HashSet::new());
+        write.id_to_user.insert(user.user_id(), user.clone());
+        write.id_to_receipts.insert(user.user_id(), HashSet::new());
         Ok(())
     }
 
@@ -95,12 +95,12 @@ impl DepoImpl for MemDepoImpl {
         let mut write = self.inner.write().await;
         let receipt = record.receipt();
         write.receipt_to_record.insert(receipt.clone(), record.clone());
-        write.id_to_receipts.get_mut(record.user_id()).unwrap().insert(receipt.clone());
+        write.id_to_receipts.get_mut(&record.user_id()).unwrap().insert(receipt.clone());
         Ok(())
     }
 
-    async fn id_to_receipts(&self, user_id: &XID) -> Result<HashSet<Receipt>> {
-        Ok(self.inner.read().await.id_to_receipts.get(user_id).unwrap().clone())
+    async fn id_to_receipts(&self, user_id: XID) -> Result<HashSet<Receipt>> {
+        Ok(self.inner.read().await.id_to_receipts.get(&user_id).unwrap().clone())
     }
 
     async fn receipt_to_record(&self, receipt: &Receipt) -> Result<Option<Record>> {
@@ -114,12 +114,12 @@ impl DepoImpl for MemDepoImpl {
         if let Some(record) = record {
             let mut write = self.inner.write().await;
             write.receipt_to_record.remove(receipt);
-            write.id_to_receipts.get_mut(record.user_id()).unwrap().remove(receipt);
+            write.id_to_receipts.get_mut(&record.user_id()).unwrap().remove(receipt);
         }
         Ok(())
     }
 
-    async fn set_user_xid_document(&self, user_id: &XID, new_xid_document: &XIDDocument) -> Result<()> {
+    async fn set_user_xid_document(&self, user_id: XID, new_xid_document: &XIDDocument) -> Result<()> {
         let user = self.expect_user_id_to_user(user_id).await?;
         let mut write = self.inner.write().await;
         let user = write.id_to_user.get_mut(&user.user_id()).unwrap();
@@ -142,7 +142,7 @@ impl DepoImpl for MemDepoImpl {
         }
         // Add the new recovery, if any
         if let Some(recovery) = recovery {
-            write.recovery_to_id.insert(recovery.to_string(), user.user_id().clone());
+            write.recovery_to_id.insert(recovery.to_string(), user.user_id());
         }
         // Set the user record to the new recovery
         let user = write.id_to_user.get_mut(&user.user_id()).unwrap();
@@ -161,8 +161,7 @@ impl DepoImpl for MemDepoImpl {
 
     async fn recovery_to_user(&self, recovery: &str) -> Result<Option<User>> {
         let read = self.inner.read().await;
-        let user_id = read.recovery_to_id
-            .get(recovery);
+        let user_id = read.recovery_to_id.get(recovery).cloned();
         let user = if let Some(user_id) = user_id {
             self.user_id_to_existing_user(user_id).await?
         } else {

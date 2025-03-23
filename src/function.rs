@@ -84,7 +84,7 @@ impl Depo {
 
     pub async fn handle_unverified_request(&self, encrypted_request: Envelope) -> Result<Envelope> {
         let sealed_request = SealedRequest::try_from_envelope(&encrypted_request, None, None, self.private_keys())?;
-        let id = sealed_request.id().clone();
+        let id = sealed_request.id();
         let function = sealed_request.function().clone();
         let sender = sealed_request.sender().clone();
         let peer_continuation = sealed_request.peer_continuation().cloned();
@@ -112,7 +112,7 @@ impl Depo {
 
     async fn validate_sender_key(&self, sender: &XIDDocument) -> Result<()> {
         let user_id = sender.xid();
-        let user = self.0.expect_user_id_to_user(&user_id).await?;
+        let user = self.0.expect_user_id_to_user(user_id).await?;
         if user.xid_document().verification_key() != sender.verification_key() {
             bail!("invalid sender verification key for {user_id}");
         }
@@ -194,7 +194,7 @@ impl Depo {
         if data.len() > self.0.max_data_size() as usize {
             bail!("data too large");
         }
-        let record = Record::new(&user.user_id(), data);
+        let record = Record::new(user.user_id(), data);
         self.0.insert_record(&record).await?;
         Ok(record.receipt().clone())
     }
@@ -210,15 +210,15 @@ impl Depo {
     ) -> Result<HashMap<Receipt, ByteString>> {
         self.validate_sender_key(sender).await?;
         let user_id = sender.xid();
-        let user = self.0.expect_user_id_to_user(&user_id).await?;
+        let user = self.0.expect_user_id_to_user(user_id).await?;
         let receipts = if receipts.is_empty() {
-            self.0.id_to_receipts(&user.user_id()).await?
+            self.0.id_to_receipts(user.user_id()).await?
         } else {
             receipts.clone()
         };
         let records = self
             .0
-            .records_for_id_and_receipts(&user.user_id(), &receipts)
+            .records_for_id_and_receipts(user.user_id(), &receipts)
             .await?;
         let mut result = HashMap::new();
         for record in records {
@@ -255,9 +255,9 @@ impl Depo {
     ) -> Result<()> {
         self.validate_sender_key(sender).await?;
         let user_id = sender.xid();
-        let user = self.0.expect_user_id_to_user(&user_id).await?;
+        let user = self.0.expect_user_id_to_user(user_id).await?;
         let recpts = if receipts.is_empty() {
-            self.0.id_to_receipts(&user.user_id()).await?
+            self.0.id_to_receipts(user.user_id()).await?
         } else {
             receipts.clone()
         };
@@ -294,7 +294,7 @@ impl Depo {
     ) -> Result<()> {
         self.validate_sender_key(sender).await?;
         let user_id = sender.xid();
-        self.0.set_user_xid_document(&user_id, new_xid_document).await?;
+        self.0.set_user_xid_document(user_id, new_xid_document).await?;
         Ok(())
     }
 
@@ -306,7 +306,7 @@ impl Depo {
         sender: &XIDDocument,
     ) -> Result<()> {
         let user_id = sender.xid();
-        if let Some(user) = self.0.user_id_to_existing_user(&user_id).await? {
+        if let Some(user) = self.0.user_id_to_existing_user(user_id).await? {
             self.validate_sender_key(sender).await?;
             self.delete_shares(sender, &HashSet::new()).await?;
             self.0.remove_user(&user).await?;
@@ -333,7 +333,7 @@ impl Depo {
     ) -> Result<()> {
         self.validate_sender_key(sender).await?;
         let user_id = sender.xid();
-        let user = self.0.expect_user_id_to_user(&user_id).await?;
+        let user = self.0.expect_user_id_to_user(user_id).await?;
         // Recovery methods must be unique
         if let Some(non_opt_recovery) = recovery {
             let existing_recovery_user = self.0.recovery_to_user(non_opt_recovery).await?;
@@ -358,7 +358,7 @@ impl Depo {
     ) -> Result<Option<String>> {
         self.validate_sender_key(sender).await?;
         let user_id = sender.xid();
-        let user = self.0.expect_user_id_to_user(&user_id).await?;
+        let user = self.0.expect_user_id_to_user(user_id).await?;
         let recovery = user.recovery().map(|s| s.to_string());
         Ok(recovery)
     }
@@ -391,7 +391,7 @@ impl Depo {
             None => bail!("unknown recovery"),
         };
         let recovery_continuation = RecoveryContinuation::new(
-            user.user_id().clone(),
+            user.user_id(),
             new_xid_document.clone(),
             dcbor::Date::now() + self.0.continuation_expiry_seconds() as f64,
         );
