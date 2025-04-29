@@ -60,8 +60,8 @@ async fn test_db_depo() {
     let schema_name = "test_db_depo";
     reset_db(schema_name).await.unwrap();
     if let Err(e) = create_db_if_needed(schema_name).await {
-        warn!("{}", Yellow.paint(format!("Skipping `{}` because can't connect to the database.", schema_name)).to_string());
-        warn!("{}", Yellow.paint(format!("{}", e)).to_string());
+        warn!("{}", Yellow.paint(format!("Skipping `{}` because can't connect to the database.", schema_name)));
+        warn!("{}", Yellow.paint(format!("{}", e)));
         return;
     }
 
@@ -80,8 +80,8 @@ async fn test_server_depo() {
     let port: u16 = 5333;
     reset_db(schema_name).await.unwrap();
     if let Err(e) = create_db_if_needed(schema_name).await {
-        warn!("{}", Yellow.paint(format!("Skipping `{}` because can't connect to the database.", schema_name)).to_string());
-        warn!("{}", Yellow.paint(format!("{}", e)).to_string());
+        warn!("{}", Yellow.paint(format!("Skipping `{}` because can't connect to the database.", schema_name)));
+        warn!("{}", Yellow.paint(format!("{}", e)));
         return;
     }
 
@@ -113,8 +113,8 @@ async fn test_server_separate() {
     let depo_public_key = match get_public_key(&depo).await {
         Ok(key) => key,
         Err(e) => {
-            warn!("{}", Yellow.paint(format!("Skipping `{}` because can't connect to the depo server.", "test_server_separate")).to_string());
-            warn!("{}", Yellow.paint(format!("{}", e)).to_string());
+            warn!("{}", Yellow.paint(format!("Skipping `{}` because can't connect to the depo server.", "test_server_separate")));
+            warn!("{}", Yellow.paint(format!("{}", e)));
             return;
         }
     };
