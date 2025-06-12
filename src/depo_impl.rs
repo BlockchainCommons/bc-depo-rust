@@ -1,12 +1,12 @@
 use std::collections::HashSet;
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use async_trait::async_trait;
-use bc_components::{PrivateKeys, XIDProvider, XID};
+use bc_components::{PrivateKeys, XID, XIDProvider};
 use bc_xid::XIDDocument;
 use depo_api::receipt::Receipt;
 
-use crate::{user::User, record::Record};
+use crate::{record::Record, user::User};
 
 #[async_trait]
 pub trait DepoImpl {
@@ -15,18 +15,36 @@ pub trait DepoImpl {
     fn private_keys(&self) -> &PrivateKeys;
     fn public_xid_document(&self) -> &XIDDocument;
     fn public_xid_document_string(&self) -> &str;
-    async fn user_id_to_existing_user(&self, user_id: XID) -> Result<Option<User>>;
+    async fn user_id_to_existing_user(
+        &self,
+        user_id: XID,
+    ) -> Result<Option<User>>;
     async fn insert_user(&self, user: &User) -> Result<()>;
     async fn insert_record(&self, record: &Record) -> Result<()>;
     async fn id_to_receipts(&self, user_id: XID) -> Result<HashSet<Receipt>>;
-    async fn receipt_to_record(&self, receipt: &Receipt) -> Result<Option<Record>>;
+    async fn receipt_to_record(
+        &self,
+        receipt: &Receipt,
+    ) -> Result<Option<Record>>;
     async fn delete_record(&self, receipt: &Receipt) -> Result<()>;
-    async fn set_user_xid_document(&self, user_id: XID, new_xid_document: &XIDDocument) -> Result<()>;
-    async fn set_user_recovery(&self, user: &User, recovery: Option<&str>) -> Result<()>;
+    async fn set_user_xid_document(
+        &self,
+        user_id: XID,
+        new_xid_document: &XIDDocument,
+    ) -> Result<()>;
+    async fn set_user_recovery(
+        &self,
+        user: &User,
+        recovery: Option<&str>,
+    ) -> Result<()>;
     async fn remove_user(&self, user: &User) -> Result<()>;
     async fn recovery_to_user(&self, recovery: &str) -> Result<Option<User>>;
 
-    async fn records_for_id_and_receipts(&self, user_id: XID, recipts: &HashSet<Receipt>) -> Result<Vec<Record>> {
+    async fn records_for_id_and_receipts(
+        &self,
+        user_id: XID,
+        recipts: &HashSet<Receipt>,
+    ) -> Result<Vec<Record>> {
         let mut result = Vec::new();
         let user_receipts = self.id_to_receipts(user_id).await?;
         for receipt in recipts {
@@ -40,8 +58,12 @@ pub trait DepoImpl {
         Ok(result)
     }
 
-    async fn xid_document_to_user(&self, xid_document: &XIDDocument) -> Result<User> {
-        let maybe_user = self.user_id_to_existing_user(xid_document.xid()).await?;
+    async fn xid_document_to_user(
+        &self,
+        xid_document: &XIDDocument,
+    ) -> Result<User> {
+        let maybe_user =
+            self.user_id_to_existing_user(xid_document.xid()).await?;
         let user = match maybe_user {
             Some(user) => user,
             None => {
