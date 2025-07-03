@@ -8,7 +8,6 @@ use anyhow::{Result, bail};
 use bc_components::{PrivateKeys, XIDProvider};
 use bc_envelope::prelude::*;
 use bc_xid::XIDDocument;
-use dcbor::Date;
 use depo_api::{
     DELETE_ACCOUNT_FUNCTION, DELETE_SHARES_FUNCTION, DeleteAccount,
     DeleteShares, FINISH_RECOVERY_FUNCTION, FinishRecovery,
@@ -428,7 +427,7 @@ impl Depo {
         let recovery_continuation = RecoveryContinuation::new(
             user.user_id(),
             new_xid_document.clone(),
-            dcbor::Date::now() + self.0.continuation_expiry_seconds() as f64,
+            Date::now() + self.0.continuation_expiry_seconds() as f64,
         );
         let continuation_envelope = recovery_continuation.to_envelope();
         Ok(continuation_envelope)
@@ -445,7 +444,7 @@ impl Depo {
             RecoveryContinuation::try_from(continuation_envelope.clone())?;
         // Ensure the continuation is valid
         let seconds_until_expiry =
-            continuation.expiry().clone() - dcbor::Date::now();
+            continuation.expiry().clone() - Date::now();
         if seconds_until_expiry < 0.0 {
             bail!("continuation expired");
         }

@@ -7,7 +7,7 @@ use bc_xid::XIDDocument;
 pub struct RecoveryContinuation {
     pub user_id: XID,
     pub new_xid_document: XIDDocument,
-    pub expiry: dcbor::Date,
+    pub expiry: Date,
 }
 
 impl RecoveryContinuation {
@@ -17,7 +17,7 @@ impl RecoveryContinuation {
     pub fn new(
         user_id: XID,
         new_xid_document: XIDDocument,
-        expiry: dcbor::Date,
+        expiry: Date,
     ) -> Self {
         Self { user_id, new_xid_document, expiry }
     }
@@ -26,7 +26,7 @@ impl RecoveryContinuation {
 
     pub fn new_xid_document(&self) -> &XIDDocument { &self.new_xid_document }
 
-    pub fn expiry(&self) -> &dcbor::Date { &self.expiry }
+    pub fn expiry(&self) -> &Date { &self.expiry }
 }
 
 impl From<RecoveryContinuation> for Envelope {
@@ -48,7 +48,7 @@ impl TryFrom<Envelope> for RecoveryContinuation {
         let xid_document_envelope = envelope
             .object_for_predicate(RecoveryContinuation::NEW_XID_DOCUMENT)?;
         let new_key = XIDDocument::try_from(xid_document_envelope)?;
-        let expiry: dcbor::Date = envelope
+        let expiry: Date = envelope
             .extract_object_for_predicate(RecoveryContinuation::EXPIRY)?;
         Ok(Self::new(user_id, new_key, expiry))
     }
