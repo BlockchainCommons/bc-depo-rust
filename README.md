@@ -137,3 +137,8 @@ The [`depo-api`](https://crates.io/crates/depo-api) crate provides a Rust API
 for the `depo` server. It is intended to be used by clients that want to store
 and retrieve BLOBs from a `depo` server. It primarily includes structures and
 methods to marshal and unmarshal the API requests and responses.
+
+## Version History
+
+### 0.12.0 - July 3, 2025
+- Align to dependencies.
