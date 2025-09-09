@@ -224,12 +224,12 @@ async fn server_call(
         .handle_encrypted_request(encrypted_request)
         .await;
 
-    SealedResponse::try_from_encrypted_envelope(
+    Ok(SealedResponse::try_from_encrypted_envelope(
         &raw_response,
         None,
         None,
         client_private_keys,
-    )
+    )?)
 }
 
 async fn server_call_ok(
