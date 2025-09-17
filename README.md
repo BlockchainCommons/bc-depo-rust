@@ -140,5 +140,8 @@ methods to marshal and unmarshal the API requests and responses.
 
 ## Version History
 
+### 0.13.0 - September 16, 2025
+- Align to dependencies.
+
 ### 0.12.0 - July 3, 2025
 - Align to dependencies.
