@@ -443,8 +443,7 @@ impl Depo {
         let continuation =
             RecoveryContinuation::try_from(continuation_envelope.clone())?;
         // Ensure the continuation is valid
-        let seconds_until_expiry =
-            continuation.expiry().clone() - Date::now();
+        let seconds_until_expiry = continuation.expiry().clone() - Date::now();
         if seconds_until_expiry < 0.0 {
             bail!("continuation expired");
         }
