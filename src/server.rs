@@ -1,3 +1,5 @@
+use std::future::Future;
+
 use anyhow::Result;
 use log::info;
 use nu_ansi_term::Color::Green;
@@ -14,10 +16,15 @@ use crate::{
     reset_db,
 };
 
-pub async fn start_server(schema_name: &str, port: u16) -> Result<()> {
-    create_db(&server_pool(), schema_name).await?;
+/// Returns a future that runs the server. Call `.await` on the returned future
+/// to start the server, or spawn it into a separate task.
+pub async fn start_server(
+    schema_name: String,
+    port: u16,
+) -> Result<impl Future<Output = ()> + Send> {
+    create_db(&server_pool(), &schema_name).await?;
 
-    let depo = Depo::new_db(schema_name).await?;
+    let depo = Depo::new_db(&schema_name).await?;
 
     let key_route = warp::path::end()
         .and(warp::get())
@@ -30,9 +37,9 @@ pub async fn start_server(schema_name: &str, port: u16) -> Result<()> {
         .and(warp::body::bytes())
         .and_then(operation_handler);
 
-    let cloned_schema_name = schema_name.to_owned();
+    let cloned_schema_name = schema_name.clone();
 
-    let reset_db_route = warp::path("reset-db")
+    let reset_db_route = warp::path("reset-db".to_owned())
         .and(warp::post())
         .and(warp::any().map(move || cloned_schema_name.clone()))
         .and_then(reset_db_handler);
@@ -58,9 +65,10 @@ pub async fn start_server(schema_name: &str, port: u16) -> Result<()> {
         ))
     );
 
-    warp::serve(routes).run(socket_addr).await;
-
-    Ok(())
+    // Workaround for warp 0.4 lifetime issue with tokio::spawn
+    // See: https://github.com/seanmonstar/warp/issues/1130
+    let server = warp::serve(routes).bind(socket_addr).await;
+    Ok(server.run())
 }
 
 fn with_depo(

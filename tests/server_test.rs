@@ -96,9 +96,8 @@ async fn test_server_depo() {
     }
 
     // Start the server and wait for it to be ready
-    tokio::spawn(async move {
-        start_server(schema_name, port).await.unwrap();
-    });
+    let server = start_server(schema_name.to_owned(), port).await.unwrap();
+    tokio::spawn(server);
     sleep(Duration::from_secs(1)).await;
 
     // Start the client

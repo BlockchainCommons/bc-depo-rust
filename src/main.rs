@@ -8,13 +8,16 @@ async fn main() {
 
     setup_log();
 
-    let schema_name = "depo";
+    let schema_name = "depo".to_owned();
 
-    if let Err(e) = start_server(schema_name, 5332).await {
-        error!(
-            "{}",
-            Red.paint("Could not start server. Is the database running?")
-        );
-        error!("{}", Red.paint(format!("{}", e)));
+    match start_server(schema_name, 5332).await {
+        Ok(server) => server.await,
+        Err(e) => {
+            error!(
+                "{}",
+                Red.paint("Could not start server. Is the database running?")
+            );
+            error!("{}", Red.paint(format!("{}", e)));
+        }
     };
 }
