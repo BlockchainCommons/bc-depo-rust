@@ -119,7 +119,7 @@ impl Depo {
             + Duration::from_secs(self.0.continuation_expiry_seconds());
         let sealed_envelope = sealed_response
             .to_envelope(
-                Some(&state_expiry_date),
+                Some(state_expiry_date),
                 Some(self.private_keys()),
                 Some(&sender),
             )
@@ -443,7 +443,7 @@ impl Depo {
         let continuation =
             RecoveryContinuation::try_from(continuation_envelope.clone())?;
         // Ensure the continuation is valid
-        let seconds_until_expiry = continuation.expiry().clone() - Date::now();
+        let seconds_until_expiry = continuation.expiry() - Date::now();
         if seconds_until_expiry < 0.0 {
             bail!("continuation expired");
         }

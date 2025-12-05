@@ -26,7 +26,7 @@ impl RecoveryContinuation {
 
     pub fn new_xid_document(&self) -> &XIDDocument { &self.new_xid_document }
 
-    pub fn expiry(&self) -> &Date { &self.expiry }
+    pub fn expiry(&self) -> Date { self.expiry }
 }
 
 impl From<RecoveryContinuation> for Envelope {
