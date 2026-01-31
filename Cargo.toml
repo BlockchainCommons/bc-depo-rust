@@ -25,10 +25,10 @@ categories = [
 dcbor = { version = "^0.25.0", features = ["multithreaded"] }
 bc-ur = "^0.19.0"
 bc-components = "^0.31.0"
-bc-envelope = { version = "^0.41.0", features = ["multithreaded"] }
+bc-envelope = { version = "^0.41.1", features = ["multithreaded"] }
 gstp = "^0.13.0"
 depo-api = { version = "^0.15.0", features = ["multithreaded"] }
-bc-xid = "^0.20.0"
+bc-xid = "^0.20.1"
 
 warp = { version = "^0.4.2", features = ["server"] }
 tokio = { version = "^1.0.0", features = ["full"] }
